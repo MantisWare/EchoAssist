@@ -1,0 +1,90 @@
+{
+  "name": "echo-assist",
+  "version": "1.0.0",
+  "description": "EchoAssist - Invisible AI assistant for meetings, undetectable during screen share",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder",
+    "dev": "electron . --enable-logging",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.32.1",
+    "@google/generative-ai": "^0.2.1",
+    "adm-zip": "^0.5.10",
+    "dotenv": "^16.3.1",
+    "electron-store": "^8.1.0",
+    "node-window-manager": "^2.2.4",
+    "openai": "^4.77.0",
+    "screenshot-desktop": "^1.15.0"
+  },
+  "devDependencies": {
+    "electron": "^28.0.0",
+    "electron-builder": "^24.0.0",
+    "esbuild": "^0.25.6"
+  },
+  "build": {
+    "appId": "com.google.chrome",
+    "productName": "Google Chrome (2)",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "package.json",
+      "node_modules/**/*",
+      "!node_modules/.cache/**/*",
+      "!.git/**/*",
+      "!dist/**/*",
+      "vosk_live.py",
+      "transcribe.py"
+    ],
+    "asarUnpack": [
+      "node_modules/screenshot-desktop/**/*",
+      "node_modules/node-window-manager/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": ".env",
+        "to": ".env"
+      },
+      {
+        "from": "vosk_live.py",
+        "to": "vosk_live.py",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "transcribe.py",
+        "to": "transcribe.py",
+        "filter": ["**/*"]
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "assets/chrome.icns"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "assets/chrome.ico",
+      "requestedExecutionLevel": "asInvoker",
+      "verifyUpdateCodeSignature": false,
+      "publisherName": "Google LLC",
+      "fileAssociations": []
+    },
+    "portable": {
+      "artifactName": "GoogleChrome.exe"
+    },
+    "linux": {
+      "target": "AppImage",
+      "icon": "assets/chrome.png"
+    }
+  },
+  "author": "Waldo Marais (MantisWare)",
+  "license": "MIT"
+}

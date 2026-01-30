@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Settings - AI Assistant</title>
+  <link rel="stylesheet" href="settings-styles.css">
+</head>
+<body>
+  <div class="settings-container">
+    <div class="settings-header">
+      <h1 class="settings-title"><svg class="section-icon" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M19.14 12.94c.04-.31.06-.63.06-.94 0-.31-.02-.63-.06-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg> Settings</h1>
+      <button id="close-settings" class="close-btn" title="Close">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M18.3 5.71a1 1 0 0 0-1.41 0L12 10.59 7.11 5.7a1 1 0 1 0-1.42 1.42L10.59 12l-4.9 4.89a1 1 0 0 0 1.42 1.42L12 13.41l4.89 4.9a1 1 0 0 0 1.42-1.42L13.41 12l4.9-4.89a1 1 0 0 0 0-1.4Z"/>
+        </svg>
+      </button>
+    </div>
+
+    <div class="settings-body">
+      <!-- API Keys Section -->
+      <section class="settings-section">
+        <div class="section-header">
+          <h2 class="section-title"><svg class="section-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12.65 10C11.83 7.67 9.61 6 7 6c-3.31 0-6 2.69-6 6s2.69 6 6 6c2.61 0 4.83-1.67 5.65-4H17v4h4v-4h2v-4H12.65zM7 14c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z"/></svg> AI Provider API Keys</h2>
+          <p class="section-description">Configure your API keys to enable AI features. Keys are encrypted and stored securely on your device.</p>
+        </div>
+
+        <!-- Gemini API Key -->
+        <div class="settings-field">
+          <div class="field-header">
+            <label class="field-label">
+              <span class="provider-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L9.19 8.63 2 9.24l5.46 4.73L5.82 21 12 17.27 18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2z"/></svg></span>
+              Google Gemini
+            </label>
+            <span id="gemini-status" class="api-status"></span>
+          </div>
+          <p class="field-description">Free tier available. Get your key from <a href="https://aistudio.google.com/" target="_blank">Google AI Studio</a></p>
+          <div class="api-key-input-group">
+            <input type="password" id="gemini-api-key" class="api-key-input" placeholder="Enter Gemini API key..." autocomplete="off">
+            <button class="toggle-visibility-btn" data-target="gemini-api-key" title="Show/Hide">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/>
+              </svg>
+            </button>
+            <button class="save-api-key-btn" data-provider="gemini" title="Save Key">Save</button>
+            <button class="clear-api-key-btn" data-provider="gemini" title="Clear Key">Clear</button>
+          </div>
+        </div>
+
+        <!-- OpenAI API Key -->
+        <div class="settings-field">
+          <div class="field-header">
+            <label class="field-label">
+              <span class="provider-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M20 18c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2H0v2h24v-2h-4zM4 6h16v10H4V6z"/><circle cx="8" cy="11" r="2"/><circle cx="16" cy="11" r="2"/></svg></span>
+              OpenAI (GPT-4)
+            </label>
+            <span id="openai-status" class="api-status"></span>
+          </div>
+          <p class="field-description">Paid API. Get your key from <a href="https://platform.openai.com/api-keys" target="_blank">OpenAI Platform</a></p>
+          <div class="api-key-input-group">
+            <input type="password" id="openai-api-key" class="api-key-input" placeholder="Enter OpenAI API key (sk-...)..." autocomplete="off">
+            <button class="toggle-visibility-btn" data-target="openai-api-key" title="Show/Hide">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/>
+              </svg>
+            </button>
+            <button class="save-api-key-btn" data-provider="openai" title="Save Key">Save</button>
+            <button class="clear-api-key-btn" data-provider="openai" title="Clear Key">Clear</button>
+          </div>
+        </div>
+
+        <!-- Anthropic API Key -->
+        <div class="settings-field">
+          <div class="field-header">
+            <label class="field-label">
+              <span class="provider-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-4-8c.79 0 1.5-.71 1.5-1.5S8.79 9 8 9s-1.5.71-1.5 1.5S7.21 12 8 12zm8 0c.79 0 1.5-.71 1.5-1.5S16.79 9 16 9s-1.5.71-1.5 1.5.71 1.5 1.5 1.5zm-4 6c2.21 0 4-1.79 4-4h-8c0 2.21 1.79 4 4 4z"/></svg></span>
+              Anthropic (Claude)
+            </label>
+            <span id="anthropic-status" class="api-status"></span>
+          </div>
+          <p class="field-description">Paid API. Get your key from <a href="https://console.anthropic.com/" target="_blank">Anthropic Console</a></p>
+          <div class="api-key-input-group">
+            <input type="password" id="anthropic-api-key" class="api-key-input" placeholder="Enter Anthropic API key (sk-ant-...)..." autocomplete="off">
+            <button class="toggle-visibility-btn" data-target="anthropic-api-key" title="Show/Hide">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/>
+              </svg>
+            </button>
+            <button class="save-api-key-btn" data-provider="anthropic" title="Save Key">Save</button>
+            <button class="clear-api-key-btn" data-provider="anthropic" title="Clear Key">Clear</button>
+          </div>
+        </div>
+
+        <!-- OpenRouter API Key -->
+        <div class="settings-field">
+          <div class="field-header">
+            <label class="field-label">
+              <span class="provider-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg></span>
+              OpenRouter
+            </label>
+            <span id="openrouter-status" class="api-status"></span>
+          </div>
+          <p class="field-description">Access 100+ AI models with one key. Get it from <a href="https://openrouter.ai/keys" target="_blank">OpenRouter</a></p>
+          <div class="api-key-input-group">
+            <input type="password" id="openrouter-api-key" class="api-key-input" placeholder="Enter OpenRouter API key (sk-or-...)..." autocomplete="off">
+            <button class="toggle-visibility-btn" data-target="openrouter-api-key" title="Show/Hide">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/>
+              </svg>
+            </button>
+            <button class="save-api-key-btn" data-provider="openrouter" title="Save Key">Save</button>
+            <button class="clear-api-key-btn" data-provider="openrouter" title="Clear Key">Clear</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- AI Configuration Section -->
+      <section class="settings-section">
+        <div class="section-header">
+          <h2 class="section-title"><svg class="section-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M20 18c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2H0v2h24v-2h-4zM4 6h16v10H4V6z"/><circle cx="8" cy="11" r="2"/><circle cx="16" cy="11" r="2"/></svg> AI Configuration</h2>
+          <p class="section-description">Customize AI behavior and model selection.</p>
+        </div>
+
+        <div class="settings-field">
+          <div class="field-header">
+            <label class="field-label" for="default-provider">Default AI Provider</label>
+          </div>
+          <p class="field-description">Select which AI provider to use by default.</p>
+          <select id="default-provider" class="settings-select">
+            <option value="gemini">Google Gemini (Free tier)</option>
+            <option value="openai">OpenAI GPT-4o</option>
+            <option value="anthropic">Anthropic Claude</option>
+            <option value="openrouter">OpenRouter (100+ models)</option>
+          </select>
+        </div>
+
+        <!-- AI Model Selection -->
+        <div class="settings-field">
+          <div class="field-header">
+            <label class="field-label">Model Selection</label>
+          </div>
+          <p class="field-description">Choose specific models for each provider.</p>
+          
+          <div class="model-groups">
+            <p class="no-providers-message hidden" id="no-providers-message">Configure API keys above to see model options.</p>
+            
+            <!-- Gemini Models -->
+            <div class="provider-model-group" data-provider="gemini">
+              <div class="provider-model-header">
+                <span class="provider-header-content"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L9.19 8.63 2 9.24l5.46 4.73L5.82 21 12 17.27 18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2z"/></svg> Gemini</span>
+                <button type="button" class="refresh-models-btn" data-provider="gemini" title="Refresh available models">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M17.65 6.35A7.958 7.958 0 0012 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0112 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+                </button>
+              </div>
+              <select id="gemini-model" class="model-select">
+                <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite (Fast)</option>
+                <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
+                <option value="gemini-1.5-flash">Gemini 1.5 Flash</option>
+                <option value="gemini-1.5-pro">Gemini 1.5 Pro (Best)</option>
+              </select>
+            </div>
+
+            <!-- OpenAI Models -->
+            <div class="provider-model-group" data-provider="openai">
+              <div class="provider-model-header">
+                <span class="provider-header-content"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M20 18c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2H0v2h24v-2h-4zM4 6h16v10H4V6z"/><circle cx="8" cy="11" r="2"/><circle cx="16" cy="11" r="2"/></svg> OpenAI</span>
+                <button type="button" class="refresh-models-btn" data-provider="openai" title="Refresh available models">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M17.65 6.35A7.958 7.958 0 0012 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0112 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+                </button>
+              </div>
+              <div class="model-row">
+                <div class="model-selector">
+                  <label>Vision</label>
+                  <select id="openai-vision-model" class="model-select">
+                    <option value="gpt-4o">GPT-4o</option>
+                    <option value="gpt-4-turbo">GPT-4 Turbo</option>
+                    <option value="gpt-4o-mini">GPT-4o Mini</option>
+                  </select>
+                </div>
+                <div class="model-selector">
+                  <label>Text</label>
+                  <select id="openai-text-model" class="model-select">
+                    <option value="gpt-4o-mini">GPT-4o Mini</option>
+                    <option value="gpt-4o">GPT-4o</option>
+                    <option value="gpt-4-turbo">GPT-4 Turbo</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <!-- Anthropic Models -->
+            <div class="provider-model-group" data-provider="anthropic">
+              <div class="provider-model-header">
+                <span class="provider-header-content"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-4-8c.79 0 1.5-.71 1.5-1.5S8.79 9 8 9s-1.5.71-1.5 1.5S7.21 12 8 12zm8 0c.79 0 1.5-.71 1.5-1.5S16.79 9 16 9s-1.5.71-1.5 1.5.71 1.5 1.5 1.5zm-4 6c2.21 0 4-1.79 4-4h-8c0 2.21 1.79 4 4 4z"/></svg> Anthropic</span>
+                <button type="button" class="refresh-models-btn" data-provider="anthropic" title="Refresh available models">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M17.65 6.35A7.958 7.958 0 0012 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0112 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+                </button>
+              </div>
+              <div class="model-row">
+                <div class="model-selector">
+                  <label>Vision</label>
+                  <select id="anthropic-vision-model" class="model-select">
+                    <option value="claude-sonnet-4-20250514">Claude Sonnet 4</option>
+                    <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option>
+                    <option value="claude-3-opus-20240229">Claude 3 Opus</option>
+                  </select>
+                </div>
+                <div class="model-selector">
+                  <label>Text</label>
+                  <select id="anthropic-text-model" class="model-select">
+                    <option value="claude-3-haiku-20240307">Claude 3 Haiku</option>
+                    <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option>
+                    <option value="claude-sonnet-4-20250514">Claude Sonnet 4</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <!-- OpenRouter Models -->
+            <div class="provider-model-group" data-provider="openrouter">
+              <div class="provider-model-header">
+                <span class="provider-header-content"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg> OpenRouter</span>
+                <button type="button" class="refresh-models-btn" data-provider="openrouter" title="Refresh available models">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M17.65 6.35A7.958 7.958 0 0012 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0112 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+                </button>
+              </div>
+              <div class="model-row">
+                <div class="model-selector">
+                  <label>Vision</label>
+                  <select id="openrouter-vision-model" class="model-select">
+                    <option value="anthropic/claude-3.5-sonnet">Claude 3.5 Sonnet</option>
+                    <option value="openai/gpt-4o">GPT-4o</option>
+                    <option value="google/gemini-pro-1.5">Gemini Pro 1.5</option>
+                  </select>
+                </div>
+                <div class="model-selector">
+                  <label>Text</label>
+                  <select id="openrouter-text-model" class="model-select">
+                    <option value="anthropic/claude-3-haiku">Claude 3 Haiku</option>
+                    <option value="openai/gpt-4o-mini">GPT-4o Mini</option>
+                    <option value="google/gemini-flash-1.5">Gemini Flash 1.5</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Voice Recognition Section -->
+      <section class="settings-section">
+        <div class="section-header">
+          <h2 class="section-title"><svg class="section-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v4"/><path d="M8 23h8"/></svg> Voice Recognition</h2>
+          <p class="section-description">Configure speech-to-text using Vosk (offline AI).</p>
+        </div>
+
+        <!-- ASR Model Selection -->
+        <div class="settings-field vosk-model-field">
+          <div class="field-header">
+            <label class="field-label">Speech Recognition Model (ASR)</label>
+            <span id="vosk-status" class="api-status">Checking...</span>
+          </div>
+          <p class="field-description">Select a Vosk model for offline speech recognition. Larger models are more accurate but slower.</p>
+          
+          <div class="model-size-selector">
+            <div class="model-option" data-size="small">
+              <input type="radio" name="vosk-model-size" id="vosk-small" value="small">
+              <label for="vosk-small">
+                <span class="model-name">Small</span>
+                <span class="model-size">~50 MB</span>
+                <span class="model-desc">Fast, less accurate</span>
+                <span id="vosk-small-status" class="install-status"></span>
+              </label>
+            </div>
+            <div class="model-option" data-size="medium">
+              <input type="radio" name="vosk-model-size" id="vosk-medium" value="medium">
+              <label for="vosk-medium">
+                <span class="model-name">Medium</span>
+                <span class="model-size">~500 MB</span>
+                <span class="model-desc">Balanced</span>
+                <span id="vosk-medium-status" class="install-status"></span>
+              </label>
+            </div>
+            <div class="model-option" data-size="large">
+              <input type="radio" name="vosk-model-size" id="vosk-large" value="large" checked>
+              <label for="vosk-large">
+                <span class="model-name">Large</span>
+                <span class="model-size">~1.8 GB</span>
+                <span class="model-desc">Most accurate</span>
+                <span id="vosk-large-status" class="install-status"></span>
+              </label>
+            </div>
+          </div>
+
+          <!-- Progress Bar -->
+          <div id="vosk-progress" class="progress-container hidden">
+            <div class="progress-bar">
+              <div id="vosk-progress-fill" class="progress-fill"></div>
+            </div>
+            <span id="vosk-progress-text" class="progress-text">0%</span>
+          </div>
+
+          <!-- Actions -->
+          <div class="model-actions">
+            <button id="vosk-download-btn" class="action-btn primary">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/>
+              </svg>
+              <span id="vosk-download-text">Install Model</span>
+            </button>
+            <button id="vosk-delete-btn" class="action-btn secondary hidden">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>
+              </svg>
+              Delete Model
+            </button>
+          </div>
+
+          <!-- Dev Notice -->
+          <div id="vosk-dev-notice" class="dev-notice hidden">
+            <span class="dev-badge">DEV</span>
+            <span>Local models available - will extract from models/ folder</span>
+          </div>
+        </div>
+
+        <!-- Speaker Detection Model -->
+        <div class="settings-field speaker-model-field">
+          <div class="field-header">
+            <label class="field-label">Speaker Detection Model (Optional)</label>
+            <span id="speaker-status" class="api-status">Checking...</span>
+          </div>
+          <p class="field-description">
+            Enable automatic speaker change detection to separate different voices in the transcript.
+            This is a small model (~13 MB) that works alongside any ASR model.
+          </p>
+
+          <!-- Progress Bar -->
+          <div id="speaker-progress" class="progress-container hidden">
+            <div class="progress-bar">
+              <div id="speaker-progress-fill" class="progress-fill"></div>
+            </div>
+            <span id="speaker-progress-text" class="progress-text">0%</span>
+          </div>
+
+          <!-- Actions -->
+          <div class="model-actions">
+            <button id="speaker-download-btn" class="action-btn primary">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/>
+              </svg>
+              <span id="speaker-download-text">Download (~13 MB)</span>
+            </button>
+            <button id="speaker-delete-btn" class="action-btn secondary hidden">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>
+              </svg>
+              Delete Model
+            </button>
+          </div>
+
+          <div class="info-box">
+            <span class="info-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></span>
+            <span>When enabled, the transcript will automatically add line breaks when a different person starts speaking.</span>
+          </div>
+        </div>
+
+        <!-- Voice Settings -->
+        <div class="settings-field">
+          <div class="field-header">
+            <label class="field-label" for="voice-language">Language</label>
+          </div>
+          <select id="voice-language" class="settings-select">
+            <option value="en-US">English (US)</option>
+            <option value="en-GB">English (UK)</option>
+            <option value="es-ES">Spanish</option>
+            <option value="fr-FR">French</option>
+            <option value="de-DE">German</option>
+          </select>
+        </div>
+
+        <div class="settings-field">
+          <div class="field-header">
+            <label class="field-label">Auto-start Voice</label>
+            <label class="toggle-switch">
+              <input type="checkbox" id="voice-autostart">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <p class="field-description">Automatically start voice recognition when the app launches.</p>
+        </div>
+      </section>
+
+      <!-- Transcript Correction Section -->
+      <section class="settings-section">
+        <div class="section-header">
+          <h2 class="section-title"><svg class="section-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M7 14c-1.66 0-3 1.34-3 3 0 1.31-1.16 2-2 2 .92 1.22 2.49 2 4 2 2.21 0 4-1.79 4-4 0-1.66-1.34-3-3-3zm13.71-9.37l-1.34-1.34a.996.996 0 00-1.41 0L9 12.25 11.75 15l8.96-8.96a.996.996 0 000-1.41z"/></svg> Transcript Correction</h2>
+          <p class="section-description">Use AI to automatically fix misheard words in transcriptions.</p>
+        </div>
+
+        <div class="settings-field">
+          <div class="field-header">
+            <label class="field-label">Enable Auto-Correction</label>
+            <label class="toggle-switch">
+              <input type="checkbox" id="correction-enabled" checked>
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <p class="field-description">Automatically correct misheard words using AI. Words that sound similar but are incorrect (like "Baris" instead of "Paris") will be fixed.</p>
+        </div>
+
+        <div class="settings-field">
+          <div class="field-header">
+            <label class="field-label" for="correction-frequency">Correction Frequency</label>
+          </div>
+          <p class="field-description">How often to send transcript to AI for correction.</p>
+          <select id="correction-frequency" class="settings-select">
+            <option value="15000">Every 15 seconds</option>
+            <option value="30000" selected>Every 30 seconds</option>
+            <option value="60000">Every 60 seconds</option>
+            <option value="manual">Manual only</option>
+          </select>
+        </div>
+
+        <div class="settings-field">
+          <div class="field-header">
+            <label class="field-label" for="correction-accent">Speaker Accent Hint</label>
+          </div>
+          <p class="field-description">Helps AI better understand common pronunciation patterns.</p>
+          <select id="correction-accent" class="settings-select">
+            <option value="general" selected>General / No hint</option>
+            <option value="british">British English</option>
+            <option value="australian">Australian English</option>
+            <option value="indian">Indian English</option>
+            <option value="scottish">Scottish English</option>
+            <option value="irish">Irish English</option>
+            <option value="southern_us">Southern US English</option>
+            <option value="african">African English</option>
+          </select>
+        </div>
+
+        <div class="info-box">
+          <span class="info-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M9 21c0 .55.45 1 1 1h4c.55 0 1-.45 1-1v-1H9v1zm3-19C8.14 2 5 5.14 5 9c0 2.38 1.19 4.47 3 5.74V17c0 .55.45 1 1 1h6c.55 0 1-.45 1-1v-2.26c1.81-1.27 3-3.36 3-5.74 0-3.86-3.14-7-7-7z"/></svg></span>
+          <span>You can also manually polish the transcript anytime by clicking the Polish button in the transcript panel.</span>
+        </div>
+      </section>
+
+      <!-- Screenshot Settings -->
+      <section class="settings-section">
+        <div class="section-header">
+          <h2 class="section-title"><svg class="section-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M9 2 7.17 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2h-3.17L15 2H9zm3 15c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5z"/></svg> Screenshot Settings</h2>
+        </div>
+
+        <div class="settings-field">
+          <div class="field-header">
+            <label class="field-label">Maximum Screenshots</label>
+          </div>
+          <div class="range-group">
+            <input type="range" id="max-screenshots" class="settings-range" min="1" max="10" value="3">
+            <span id="max-screenshots-value" class="range-value">3</span>
+          </div>
+        </div>
+
+        <div class="settings-field">
+          <div class="field-header">
+            <label class="field-label">Capture Delay (ms)</label>
+          </div>
+          <div class="range-group">
+            <input type="range" id="capture-delay" class="settings-range" min="100" max="1000" step="50" value="300">
+            <span id="capture-delay-value" class="range-value">300ms</span>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div class="settings-footer">
+      <button id="save-settings" class="btn-primary">Save & Close</button>
+    </div>
+  </div>
+
+  <script src="settings.js"></script>
+</body>
+</html>
