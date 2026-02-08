@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EchoAssist Control Bar</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    /* Control bar window body - transparent, no margin */
+    html, body {
+      background: transparent;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      -webkit-user-select: none;
+      user-select: none;
+      height: 100%;
+    }
+
+    /* The entire panel is draggable by default */
+    .control-bar-panel {
+      -webkit-app-region: drag;
+      display: flex;
+      align-items: center;
+      height: 100%;
+      padding: 4px 10px;
+      gap: 6px;
+      border-radius: 14px;
+      background: var(--bg-primary);
+      backdrop-filter: blur(var(--blur-amount)) saturate(1.8);
+      -webkit-backdrop-filter: blur(var(--blur-amount)) saturate(1.8);
+      border: 1px solid var(--border-primary);
+      box-shadow: var(--shadow-lg);
+    }
+
+    /* All interactive elements must be no-drag */
+    .control-bar-panel button,
+    .control-bar-panel input,
+    .control-bar-panel select,
+    .control-bar-panel .action-btn,
+    .control-bar-panel .dev-mode-pill,
+    .control-bar-panel .theme-toggle,
+    .control-bar-panel .transparency-slider,
+    .control-bar-panel .provider-select {
+      -webkit-app-region: no-drag;
+    }
+  </style>
+</head>
+<body>
+  <div class="control-bar-panel">
+    <!-- Drag Handle -->
+    <div class="control-bar-drag" title="Drag to move">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M11 18c0 1.1-.9 2-2 2s-2-.9-2-2 .9-2 2-2 2 .9 2 2zm-2-8c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0-6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm6 4c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/>
+      </svg>
+    </div>
+
+    <!-- Status Section -->
+    <div class="control-bar-status">
+      <div class="status-dot" id="status-dot"></div>
+      <span class="timer" id="timer-display">00:00</span>
+      <div class="screenshot-count" id="screenshot-count">0</div>
+    </div>
+
+    <!-- Divider -->
+    <div class="control-bar-divider"></div>
+
+    <!-- Settings Controls (inline) -->
+    <div class="control-bar-settings">
+      <!-- Dev Mode Pill -->
+      <button id="dev-mode-pill" class="dev-mode-pill hidden" title="Click to toggle content protection">
+        <span id="dev-pill-text" class="dev-pill-text">DEV</span>
+      </button>
+      
+      <!-- Theme Toggle -->
+      <button id="theme-toggle" class="theme-toggle" title="Toggle Light/Dark Mode">
+        <div class="theme-toggle-thumb">
+          <svg class="sun-icon" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10zm0-5a1 1 0 0 1 1 1v2a1 1 0 1 1-2 0V3a1 1 0 0 1 1-1zm0 18a1 1 0 0 1 1 1v2a1 1 0 1 1-2 0v-2a1 1 0 0 1 1-1z"/>
+          </svg>
+          <svg class="moon-icon" viewBox="0 0 24 24" fill="currentColor" style="display: none;">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+          </svg>
+        </div>
+      </button>
+
+      <!-- Opacity Slider -->
+      <input type="range" id="transparency-slider" class="transparency-slider" 
+             min="30" max="100" value="100" title="Adjust Window Transparency">
+      <span id="transparency-value" class="transparency-value">100%</span>
+    </div>
+
+    <!-- Divider -->
+    <div class="control-bar-divider"></div>
+
+    <!-- Action Buttons -->
+    <div class="control-bar-actions">
+      <button id="voice-toggle" class="action-btn voice-btn" title="Toggle Voice Recognition (Ctrl+Alt+Shift+V)" data-label="Mic">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm-1-9c0-.55.45-1 1-1s1 .45 1 1v6c0 .55-.45 1-1 1s-1-.45-1-1V5zm6 6c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
+        </svg>
+        <span class="action-label">Mic</span>
+      </button>
+
+      <button id="screenshot-btn" class="action-btn screenshot-btn" title="Screenshot (Ctrl+Alt+Shift+S)" data-label="SS">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M9 2 7.17 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2h-3.17L15 2H9zm3 15c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5z"/>
+        </svg>
+        <span class="action-label">SS</span>
+        <span id="capture-mode-badge" class="capture-mode-badge" style="display: none;"></span>
+      </button>
+
+      <button id="region-btn" class="action-btn region-btn" title="Select Capture Region (Ctrl+Alt+Shift+R)" data-label="Region">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M17 15h2V7c0-1.1-.9-2-2-2H9v2h8v8zM7 17V1H5v4H1v2h4v10c0 1.1.9 2 2 2h10v4h2v-4h4v-2H7z"/>
+        </svg>
+        <span class="action-label">Region</span>
+      </button>
+
+      <button id="analyze-btn" class="action-btn analyze-btn" title="Ask AI (Ctrl+Alt+Shift+A)" data-label="AI">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z"/>
+        </svg>
+        <span class="action-label">AI</span>
+      </button>
+
+      <button id="suggest-btn" class="action-btn suggest-btn" title="What should I say?" data-label="Suggest">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M9 21c0 .55.45 1 1 1h4c.55 0 1-.45 1-1v-1H9v1zm3-19C8.14 2 5 5.14 5 9c0 2.38 1.19 4.47 3 5.74V17c0 .55.45 1 1 1h6c.55 0 1-.45 1-1v-2.26c1.81-1.27 3-3.36 3-5.74 0-3.86-3.14-7-7-7zm2.85 11.1l-.85.6V16h-4v-2.3l-.85-.6A4.997 4.997 0 017 9c0-2.76 2.24-5 5-5s5 2.24 5 5c0 1.63-.8 3.16-2.15 4.1z"/>
+        </svg>
+        <span class="action-label">Suggest</span>
+      </button>
+
+      <button id="notes-btn" class="action-btn notes-btn" title="Generate Meeting Notes" data-label="Notes">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/>
+        </svg>
+        <span class="action-label">Notes</span>
+      </button>
+
+      <button id="insights-btn" class="action-btn insights-btn" title="Get Insights" data-label="Insights">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z"/>
+        </svg>
+        <span class="action-label">Insights</span>
+      </button>
+
+      <button id="clear-btn" class="action-btn clear-btn" title="Clear" data-label="Clear">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>
+        </svg>
+        <span class="action-label">Clear</span>
+      </button>
+
+      <button id="hide-btn" class="action-btn hide-btn" title="Emergency Hide (Ctrl+Alt+Shift+X)" data-label="Hide">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/>
+        </svg>
+        <span class="action-label">Hide</span>
+      </button>
+
+      <button id="settings-btn" class="action-btn settings-btn" title="Settings" data-label="Settings">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M19.14 12.94c.04-.31.06-.63.06-.94 0-.31-.02-.63-.06-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/>
+        </svg>
+        <span class="action-label">Settings</span>
+      </button>
+    </div>
+
+    <!-- Labels Toggle -->
+    <button id="labels-toggle" class="action-btn labels-btn" title="Toggle button labels">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M9.93 13.5h4.14L12 7.98zM20 2H4c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-4.05 16.5l-1.14-3H9.17l-1.12 3H5.96l5.11-13h1.86l5.11 13h-2.09z"/>
+      </svg>
+    </button>
+
+    <!-- Close Button -->
+    <button id="close-btn" class="action-btn close-btn" title="Close Application">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+      </svg>
+    </button>
+  </div>
+
+  <script src="control-bar-renderer.js"></script>
+</body>
+</html>

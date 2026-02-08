@@ -1,4 +1,4 @@
-const { app, BrowserWindow, globalShortcut, ipcMain, screen } = require('electron');
+const { app, BrowserWindow, globalShortcut, ipcMain, screen, Menu } = require('electron');
 const { spawn } = require('child_process');
 
 const fs = require('fs');
@@ -8,6 +8,9 @@ const screenshot = require('screenshot-desktop');
 
 // Settings Store - Secure configuration management
 const settingsStore = require('./settings-store');
+
+// Region Selection Service - Phase 5
+const regionService = require('./region-selection-service');
 
 // Helper function to check if running in dev mode
 function isDevelopment() {
@@ -51,8 +54,10 @@ const AIServiceManager = require('./ai-service-manager');
 
 (async () => {
 
-let mainWindow;
+let mainWindow;        // Transcript/summary window
+let controlBarWindow = null;  // Floating control bar window (Phase 6)
 let settingsWindow = null;
+let regionOverlayWindow = null;
 let screenshots = [];
 let chatContext = [];
 const MAX_SCREENSHOTS = 3;
@@ -128,11 +133,15 @@ function createStealthWindow() {
   console.log('Creating stealth window...');
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
 
-  // Short and wide window dimensions (resizable)
-  const windowWidth = 900;
-  const windowHeight = 400;
-  const x = Math.floor((width - windowWidth) / 2);
-  const y = 40;
+  // Load saved panel state for transcript window
+  const savedPanelState = settingsStore.getPanelState();
+  const savedTranscript = savedPanelState.transcript ?? {};
+
+  // Short and wide window dimensions (resizable), use saved if available
+  const windowWidth = savedTranscript.width ?? 900;
+  const windowHeight = savedTranscript.height ?? 400;
+  const x = savedTranscript.x ?? Math.floor((width - windowWidth) / 2);
+  const y = savedTranscript.y ?? 100; // Lower default to leave room for control bar above
 
   console.log(`Window position: ${x}, ${y}, size: ${windowWidth}x${windowHeight}`);
 
@@ -157,13 +166,13 @@ function createStealthWindow() {
       enableRemoteModule: false,
       sandbox: false                   // Keep disabled for dynamic imports
     },
-    frame: false,
+    frame: false,                      // Completely frameless - no title bar, no traffic lights
     transparent: true,
     alwaysOnTop: true,
     skipTaskbar: true,
-    resizable: true,                   // CHANGED: Enable resizing
-    minimizable: true,
-    maximizable: false,
+    resizable: true,                   // Enable resizing from edges/corners
+    minimizable: false,                // No minimize (use close button on control bar)
+    maximizable: false,                // No maximize
     closable: true,
     focusable: true,
     show: false,
@@ -172,12 +181,11 @@ function createStealthWindow() {
     acceptFirstMouse: false,
     disableAutoHideCursor: true,
     enableLargerThanScreen: false,
-    hasShadow: true,                   // Enable shadow for native macOS look
+    hasShadow: true,                   // Enable shadow for depth
     thickFrame: false,
-    titleBarStyle: 'hiddenInset',      // Native macOS traffic lights
-    trafficLightPosition: { x: 12, y: 12 },  // Position traffic lights
-    vibrancy: 'under-window',          // Native macOS vibrancy effect
-    visualEffectState: 'active',
+    // Phase 6: Removed titleBarStyle: 'hidden' — it overrides frame:false on macOS
+    // and re-enables traffic lights. frame:false alone is truly frameless.
+    // Phase 6: Removed vibrancy — conflicts with transparent on some macOS versions
     backgroundColor: '#00000000'
   });
 
@@ -283,9 +291,19 @@ function createStealthWindow() {
       mainWindow.show();
       mainWindow.focus();
       console.log('Window shown with transparent background');
+      // Phase 6: Restore saved lock state for transcript window
+      const savedPanelState = settingsStore.getPanelState();
+      const isLocked = savedPanelState.transcript?.locked ?? false;
+      if (isLocked) {
+        mainWindow.setMovable(false);
+        mainWindow.setResizable(false);
+      }
+      // Phase 6: Create the floating control bar as a separate window
+      createControlBarWindow();
     }).catch((error) => {
       console.log('JavaScript execution failed:', error);
       mainWindow.show();
+      createControlBarWindow();
     });
   });
   
@@ -298,9 +316,128 @@ function createStealthWindow() {
     console.log(`Renderer console.${level}: ${message}`);
   });
   
+  // Phase 6: Save transcript window position/size when moved or resized
+  mainWindow.on('moved', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      const bounds = mainWindow.getBounds();
+      settingsStore.setPanelState({
+        transcript: { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height }
+      });
+    }
+  });
+  mainWindow.on('resize', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      const bounds = mainWindow.getBounds();
+      settingsStore.setPanelState({
+        transcript: { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height }
+      });
+    }
+  });
+  
   if (process.env.NODE_ENV === 'development') {
     mainWindow.webContents.openDevTools();
   }
+}
+
+// ============================================================================
+// SEND TO ALL WINDOWS HELPER (Phase 6)
+// ============================================================================
+
+/**
+ * Send an IPC event to all active windows (transcript + control bar).
+ * Each renderer ignores events it doesn't care about, so this is safe.
+ */
+function sendToAllWindows(channel, ...args) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    sendToAllWindows(channel, ...args);
+  }
+  if (controlBarWindow && !controlBarWindow.isDestroyed()) {
+    controlBarWindow.webContents.send(channel, ...args);
+  }
+}
+
+// ============================================================================
+// CONTROL BAR WINDOW (Phase 6)
+// ============================================================================
+
+function createControlBarWindow() {
+  if (controlBarWindow && !controlBarWindow.isDestroyed()) {
+    controlBarWindow.focus();
+    return;
+  }
+
+  // Load saved panel state, fall back to position above transcript window
+  const savedState = settingsStore.getPanelState();
+  const windowBounds = mainWindow.getBounds();
+  const controlBarWidth = savedState.controlBar?.width ?? windowBounds.width;
+  const controlBarHeight = 56;
+  const controlBarX = savedState.controlBar?.x ?? windowBounds.x;
+  const controlBarY = savedState.controlBar?.y ?? Math.max(0, windowBounds.y - controlBarHeight - 8);
+
+  controlBarWindow = new BrowserWindow({
+    width: controlBarWidth,
+    height: controlBarHeight,
+    x: controlBarX,
+    y: controlBarY,
+    frame: false,
+    transparent: true,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    closable: true,
+    focusable: true,
+    show: false,
+    type: 'toolbar',
+    hasShadow: true,
+    thickFrame: false,
+    backgroundColor: '#00000000',
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload.js'),
+      backgroundThrottling: false,
+      sandbox: false
+    }
+  });
+
+  controlBarWindow.loadFile(path.join(__dirname, 'control-bar.html'));
+
+  // Apply same stealth settings as main window
+  if (process.platform === 'darwin') {
+    controlBarWindow.setVisibleOnAllWorkspaces(true, {
+      visibleOnFullScreen: true,
+      skipTransformProcessType: true
+    });
+    controlBarWindow.setAlwaysOnTop(true, 'pop-up-menu', 1);
+    controlBarWindow.setHiddenInMissionControl(true);
+  } else if (process.platform === 'win32') {
+    controlBarWindow.setSkipTaskbar(true);
+    controlBarWindow.setAlwaysOnTop(true, 'pop-up-menu');
+  }
+
+  // Content protection mirrors main window
+  controlBarWindow.setContentProtection(global.contentProtectionEnabled ?? false);
+
+  controlBarWindow.webContents.on('did-finish-load', () => {
+    controlBarWindow.show();
+    console.log('[Phase 6] Control bar window shown');
+  });
+
+  // Save position when the control bar is moved
+  controlBarWindow.on('moved', () => {
+    if (controlBarWindow && !controlBarWindow.isDestroyed()) {
+      const bounds = controlBarWindow.getBounds();
+      settingsStore.setPanelState({
+        controlBar: { x: bounds.x, y: bounds.y, width: bounds.width }
+      });
+    }
+  });
+
+  controlBarWindow.on('closed', () => {
+    controlBarWindow = null;
+  });
 }
 
 // ============================================================================
@@ -377,7 +514,12 @@ function registerStealthShortcuts() {
   });
 
   globalShortcut.register('CommandOrControl+Alt+Shift+V', () => {
-    mainWindow.webContents.send('toggle-voice-recognition');
+    sendToAllWindows('toggle-voice-recognition');
+  });
+
+  // Phase 5: Region selection shortcut
+  globalShortcut.register('CommandOrControl+Alt+Shift+R', () => {
+    openRegionOverlay();
   });
 
   globalShortcut.register('CommandOrControl+Alt+Shift+Left', () => {
@@ -408,11 +550,11 @@ function toggleStealthMode() {
 
   if (isVisible) {
     mainWindow.setOpacity(0.6);
-    mainWindow.webContents.send('set-stealth-mode', true);
+    sendToAllWindows('set-stealth-mode', true);
     isVisible = false;
   } else {
     mainWindow.setOpacity(1.0);
-    mainWindow.webContents.send('set-stealth-mode', false);
+    sendToAllWindows('set-stealth-mode', false);
     isVisible = true;
   }
 }
@@ -423,13 +565,20 @@ function emergencyHide() {
     autoHideTimer = null;
   }
 
+  // Phase 6: Hide both windows
   mainWindow.setOpacity(0.01);
-  mainWindow.webContents.send('emergency-clear');
+  if (controlBarWindow && !controlBarWindow.isDestroyed()) {
+    controlBarWindow.setOpacity(0.01);
+  }
+  sendToAllWindows('emergency-clear');
   
   autoHideTimer = setTimeout(() => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.setOpacity(1.0);
       isVisible = true;
+    }
+    if (controlBarWindow && !controlBarWindow.isDestroyed()) {
+      controlBarWindow.setOpacity(1.0);
     }
     autoHideTimer = null;
   }, 2000);
@@ -465,20 +614,83 @@ function moveToPosition(position) {
   mainWindow.setPosition(x, y);
 }
 
+// ============================================================================
+// REGION OVERLAY WINDOW - Phase 5
+// ============================================================================
+
+function openRegionOverlay() {
+  // If overlay already exists, focus it
+  if (regionOverlayWindow && !regionOverlayWindow.isDestroyed()) {
+    regionOverlayWindow.focus();
+    return;
+  }
+
+  // Spawn overlay on the same display as the main window
+  const windowBounds = mainWindow.getBounds();
+  const currentDisplay = screen.getDisplayMatching(windowBounds);
+
+  regionOverlayWindow = new BrowserWindow({
+    x: currentDisplay.bounds.x,
+    y: currentDisplay.bounds.y,
+    width: currentDisplay.bounds.width,
+    height: currentDisplay.bounds.height,
+    fullscreen: true,
+    transparent: true,
+    frame: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    resizable: false,
+    movable: false,
+    focusable: true,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'region-overlay-preload.js')
+    }
+  });
+
+  // Content protection OFF - user must see the overlay
+  regionOverlayWindow.setContentProtection(false);
+
+  const overlayPath = path.join(__dirname, 'region-overlay.html');
+  regionOverlayWindow.loadFile(overlayPath);
+
+  regionOverlayWindow.once('ready-to-show', () => {
+    regionOverlayWindow.show();
+    regionOverlayWindow.focus();
+  });
+
+  regionOverlayWindow.on('closed', () => {
+    regionOverlayWindow = null;
+  });
+}
+
+function destroyRegionOverlay() {
+  if (regionOverlayWindow && !regionOverlayWindow.isDestroyed()) {
+    regionOverlayWindow.close();
+    regionOverlayWindow = null;
+  }
+}
+
 async function takeStealthScreenshot() {
   try {
     console.log('Taking stealth screenshot...');
     
     // Save current opacity to restore later
     const currentOpacity = mainWindow.getOpacity();
+    const controlBarOpacity = controlBarWindow && !controlBarWindow.isDestroyed()
+      ? controlBarWindow.getOpacity() : currentOpacity;
     
     // Get the display where the window is currently located
     const windowBounds = mainWindow.getBounds();
     const currentDisplay = screen.getDisplayMatching(windowBounds);
     console.log(`Window is on display: ${currentDisplay.id} (${currentDisplay.bounds.width}x${currentDisplay.bounds.height})`);
     
-    // Set opacity to almost zero so the app is invisible in the screenshot
+    // Set opacity to almost zero so BOTH windows are invisible in the screenshot
     mainWindow.setOpacity(0.01);
+    if (controlBarWindow && !controlBarWindow.isDestroyed()) {
+      controlBarWindow.setOpacity(0.01);
+    }
     
     // Wait for opacity change to render
     await new Promise(resolve => setTimeout(resolve, 200));
@@ -549,6 +761,46 @@ async function takeStealthScreenshot() {
     
     // Capture screenshot from the specific display
     await screenshot({ filename: screenshotPath, screen: targetDisplayId });
+
+    // Phase 5: Post-capture cropping based on capture mode
+    const captureConfig = regionService.loadCaptureConfig();
+    const captureMode = captureConfig.mode ?? 'fullScreen';
+
+    if (captureMode === 'region') {
+      const scaleFactor = currentDisplay.scaleFactor ?? 1;
+      regionService.cropScreenshot(screenshotPath, captureConfig.region, scaleFactor);
+      console.log(`Screenshot cropped to region: ${captureConfig.region.width}x${captureConfig.region.height}`);
+    } else if (captureMode === 'window') {
+      const windowBoundsLive = regionService.resolveWindowBounds(captureConfig);
+      if (windowBoundsLive !== null) {
+        const scaleFactor = currentDisplay.scaleFactor ?? 1;
+
+        // Clamp window bounds to the captured display (handles multi-monitor spanning)
+        const clampedBounds = regionService.clampBoundsToDisplay(
+          windowBoundsLive, currentDisplay.bounds
+        );
+
+        // Skip if clamped region is too small (window mostly on another display)
+        if (clampedBounds.width < 10 || clampedBounds.height < 10) {
+          console.warn('Window not visible on captured display — using full screen');
+          sendToAllWindows('capture-window-not-found', captureConfig.window.title ?? '');
+        } else {
+          // Adjust bounds relative to captured display origin
+          const relBounds = {
+            x: clampedBounds.x - currentDisplay.bounds.x,
+            y: clampedBounds.y - currentDisplay.bounds.y,
+            width: clampedBounds.width,
+            height: clampedBounds.height
+          };
+          regionService.cropScreenshot(screenshotPath, relBounds, scaleFactor);
+          console.log(`Screenshot cropped to window: ${captureConfig.window.title}`);
+        }
+      } else {
+        // Window not found -- notify renderer, capture full screen as fallback
+        console.warn(`Target window not found: ${captureConfig.window.title}`);
+        sendToAllWindows('capture-window-not-found', captureConfig.window.title ?? '');
+      }
+    }
     
     screenshots.push(screenshotPath);
     if (screenshots.length > MAX_SCREENSHOTS) {
@@ -558,19 +810,25 @@ async function takeStealthScreenshot() {
       }
     }
     
-    // Restore the original opacity
+    // Restore the original opacity on both windows
     mainWindow.setOpacity(currentOpacity);
+    if (controlBarWindow && !controlBarWindow.isDestroyed()) {
+      controlBarWindow.setOpacity(controlBarOpacity);
+    }
     
-    console.log(`Screenshot saved: ${screenshotPath}`);
+    console.log(`Screenshot saved: ${screenshotPath} (mode: ${captureMode})`);
     console.log(`Total screenshots: ${screenshots.length}`);
     
-    mainWindow.webContents.send('screenshot-taken-stealth', screenshots.length);
+    sendToAllWindows('screenshot-taken-stealth', screenshots.length);
     
     return screenshotPath;
   } catch (error) {
     // Restore opacity on error (use saved value if available, otherwise default to 1.0)
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.setOpacity(1.0);
+    }
+    if (controlBarWindow && !controlBarWindow.isDestroyed()) {
+      controlBarWindow.setOpacity(1.0);
     }
     console.error('Stealth screenshot error:', error);
     throw error;
@@ -586,7 +844,7 @@ async function analyzeForMeetingWithContext(context = '') {
 
   if (!aiService) {
     console.error('No AI service available');
-    mainWindow.webContents.send('analysis-result', {
+    sendToAllWindows('analysis-result', {
       error: 'No API key configured. Please add at least one API key to your .env file.'
     });
     return;
@@ -594,7 +852,7 @@ async function analyzeForMeetingWithContext(context = '') {
 
   if (!aiService.model) {
     console.error('AI model not initialized');
-    mainWindow.webContents.send('analysis-result', {
+    sendToAllWindows('analysis-result', {
       error: 'AI model not initialized. Please check your API key.'
     });
     return;
@@ -602,7 +860,7 @@ async function analyzeForMeetingWithContext(context = '') {
 
   if (screenshots.length === 0) {
     console.error('No screenshots to analyze');
-    mainWindow.webContents.send('analysis-result', {
+    sendToAllWindows('analysis-result', {
       error: 'No screenshots to analyze. Take a screenshot first.'
     });
     return;
@@ -610,7 +868,7 @@ async function analyzeForMeetingWithContext(context = '') {
 
   try {
     console.log('Sending analysis start signal...');
-    mainWindow.webContents.send('analysis-start');
+    sendToAllWindows('analysis-start');
     
     console.log('Processing screenshots...');
     const imageParts = await Promise.all(
@@ -693,7 +951,7 @@ Analyze the screenshots and conversation context:`;
       provider: activeProvider
     });
 
-    mainWindow.webContents.send('analysis-result', { text, provider: activeProvider });
+    sendToAllWindows('analysis-result', { text, provider: activeProvider });
     console.log('Analysis result sent to renderer');
     
   } catch (error) {
@@ -715,7 +973,7 @@ Analyze the screenshots and conversation context:`;
       errorMessage = `Analysis failed: ${error.message}`;
     }
     
-    mainWindow.webContents.send('analysis-result', {
+    sendToAllWindows('analysis-result', {
       error: errorMessage
     });
   }
@@ -749,8 +1007,12 @@ ipcMain.handle('toggle-content-protection', () => {
   // Toggle the content protection state
   global.contentProtectionEnabled = !global.contentProtectionEnabled;
   
+  // Phase 6: Apply content protection to both windows
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.setContentProtection(global.contentProtectionEnabled);
+  }
+  if (controlBarWindow && !controlBarWindow.isDestroyed()) {
+    controlBarWindow.setContentProtection(global.contentProtectionEnabled);
   }
   
   const status = global.contentProtectionEnabled ? 'ENABLED (stealth)' : 'DISABLED (debug)';
@@ -808,18 +1070,181 @@ ipcMain.handle('close-app', () => {
 });
 
 // ============================================================================
+// IPC HANDLERS - Phase 6: Region Menu, Theme Broadcast
+// ============================================================================
+
+ipcMain.handle('show-region-menu', () => {
+  console.log('IPC: show-region-menu called');
+  const template = [
+    {
+      label: 'Draw Region',
+      click: () => openRegionOverlay()
+    },
+    {
+      label: 'Pick Window',
+      click: () => {
+        // Open window picker modal in the transcript window
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('open-window-picker');
+        }
+      }
+    },
+    { type: 'separator' },
+    {
+      label: 'Full Screen',
+      click: () => {
+        regionService.resetToFullScreen();
+        const config = regionService.loadCaptureConfig();
+        sendToAllWindows('capture-config-changed', config);
+      }
+    }
+  ];
+  const menu = Menu.buildFromTemplate(template);
+  menu.popup({ window: controlBarWindow });
+  return { success: true };
+});
+
+ipcMain.handle('broadcast-theme-change', (_, theme) => {
+  console.log('IPC: broadcast-theme-change called with:', theme);
+  sendToAllWindows('theme-changed', theme);
+  return { success: true };
+});
+
+ipcMain.handle('get-panel-state', () => {
+  return { success: true, state: settingsStore.getPanelState() };
+});
+
+ipcMain.handle('save-panel-state', (_, state) => {
+  settingsStore.setPanelState(state);
+  return { success: true };
+});
+
+// ============================================================================
+// IPC HANDLERS - Region/Window Capture Selection (Phase 5)
+// ============================================================================
+
+ipcMain.handle('select-capture-region', () => {
+  console.log('IPC: select-capture-region called');
+  openRegionOverlay();
+  return { success: true };
+});
+
+ipcMain.handle('confirm-capture-region', (_, bounds) => {
+  console.log('IPC: confirm-capture-region called with:', bounds);
+  
+  // Validate bounds
+  if (bounds === undefined || bounds === null ||
+      typeof bounds.x !== 'number' || typeof bounds.y !== 'number' ||
+      typeof bounds.width !== 'number' || typeof bounds.height !== 'number' ||
+      bounds.width <= 0 || bounds.height <= 0) {
+    console.error('Invalid region bounds:', bounds);
+    destroyRegionOverlay();
+    return { success: false, error: 'Invalid region bounds' };
+  }
+
+  // Save config
+  regionService.saveCaptureConfig({
+    mode: 'region',
+    region: {
+      x: Math.round(bounds.x),
+      y: Math.round(bounds.y),
+      width: Math.round(bounds.width),
+      height: Math.round(bounds.height)
+    }
+  });
+
+  destroyRegionOverlay();
+
+  // Notify renderer of config change
+  const config = regionService.loadCaptureConfig();
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    sendToAllWindows('capture-config-changed', config);
+  }
+
+  return { success: true, config };
+});
+
+ipcMain.handle('cancel-capture-region', () => {
+  console.log('IPC: cancel-capture-region called');
+  destroyRegionOverlay();
+  return { success: true };
+});
+
+ipcMain.handle('get-open-windows', () => {
+  console.log('IPC: get-open-windows called');
+  try {
+    // Pass the Electron executable path so the service can filter out
+    // EchoAssist's own window(s). getNativeWindowHandle() returns a Buffer
+    // which doesn't compare correctly with node-window-manager's numeric IDs.
+    const selfExecPath = process.execPath;
+    const windows = regionService.getOpenWindows(selfExecPath);
+    return { success: true, windows };
+  } catch (error) {
+    console.error('Error getting open windows:', error.message);
+    return { success: false, windows: [], error: error.message };
+  }
+});
+
+ipcMain.handle('select-capture-window', (_, windowInfo) => {
+  console.log('IPC: select-capture-window called with:', windowInfo);
+
+  if (windowInfo === undefined || windowInfo === null) {
+    return { success: false, error: 'No window info provided' };
+  }
+
+  regionService.saveCaptureConfig({
+    mode: 'window',
+    window: {
+      title: windowInfo.title ?? '',
+      processName: windowInfo.processName ?? '',
+      followWindow: true
+    }
+  });
+
+  const config = regionService.loadCaptureConfig();
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    sendToAllWindows('capture-config-changed', config);
+  }
+
+  return { success: true, config };
+});
+
+ipcMain.handle('reset-capture-mode', () => {
+  console.log('IPC: reset-capture-mode called');
+  regionService.resetToFullScreen();
+
+  const config = regionService.loadCaptureConfig();
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    sendToAllWindows('capture-config-changed', config);
+  }
+
+  return { success: true, config };
+});
+
+ipcMain.handle('get-capture-config', () => {
+  console.log('IPC: get-capture-config called');
+  return {
+    success: true,
+    config: regionService.loadCaptureConfig()
+  };
+});
+
+// ============================================================================
 // IPC HANDLERS - Window Appearance
 // ============================================================================
 
 ipcMain.handle('set-window-opacity', (event, opacity) => {
   console.log('IPC: set-window-opacity called with:', opacity);
+  // Clamp opacity between 0.3 and 1.0 for usability
+  const clampedOpacity = Math.max(0.3, Math.min(1.0, opacity));
+  // Phase 6: Apply opacity to both windows
   if (mainWindow && !mainWindow.isDestroyed()) {
-    // Clamp opacity between 0.3 and 1.0 for usability
-    const clampedOpacity = Math.max(0.3, Math.min(1.0, opacity));
     mainWindow.setOpacity(clampedOpacity);
-    return { success: true, opacity: clampedOpacity };
   }
-  return { success: false, error: 'Window not available' };
+  if (controlBarWindow && !controlBarWindow.isDestroyed()) {
+    controlBarWindow.setOpacity(clampedOpacity);
+  }
+  return { success: true, opacity: clampedOpacity };
 });
 
 ipcMain.handle('get-window-opacity', () => {
@@ -828,6 +1253,34 @@ ipcMain.handle('get-window-opacity', () => {
     return { success: true, opacity: mainWindow.getOpacity() };
   }
   return { success: false, error: 'Window not available' };
+});
+
+// ============================================================================
+// IPC HANDLERS - Window Lock (Move/Resize Toggle)
+// ============================================================================
+
+ipcMain.handle('set-window-locked', (event, locked) => {
+  console.log('IPC: set-window-locked called with:', locked);
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.setMovable(!locked);
+    mainWindow.setResizable(!locked);
+    // Save lock state to settings
+    settingsStore.setPanelState({
+      transcript: {
+        ...settingsStore.getPanelState().transcript,
+        locked: locked
+      }
+    });
+    return { success: true, locked };
+  }
+  return { success: false, error: 'Window not available' };
+});
+
+ipcMain.handle('get-window-locked', () => {
+  console.log('IPC: get-window-locked called');
+  const panelState = settingsStore.getPanelState();
+  const locked = panelState.transcript?.locked ?? false;
+  return { success: true, locked };
 });
 
 // ============================================================================
@@ -865,7 +1318,7 @@ ipcMain.handle('set-active-provider', async (event, provider) => {
   const success = aiService.setActiveProvider(provider);
   if (success) {
     // Notify renderer of provider change
-    mainWindow.webContents.send('provider-changed', {
+    sendToAllWindows('provider-changed', {
       provider: aiService.getActiveProvider(),
       info: aiService.getProvidersInfo().find(p => p.isActive)
     });
@@ -909,14 +1362,14 @@ ipcMain.handle('set-api-key', async (event, { provider, apiKey }) => {
     
     // Notify renderer of provider availability change
     if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('settings-changed', {
+      sendToAllWindows('settings-changed', {
         type: 'api-keys',
         configured: settingsStore.getConfiguredProviders()
       });
       
       // Also send updated providers list
       if (aiService) {
-        mainWindow.webContents.send('providers-updated', {
+        sendToAllWindows('providers-updated', {
           providers: aiService.getProvidersInfo(),
           active: aiService.getActiveProvider()
         });
@@ -940,13 +1393,13 @@ ipcMain.handle('clear-api-key', async (event, provider) => {
     
     // Notify renderer
     if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('settings-changed', {
+      sendToAllWindows('settings-changed', {
         type: 'api-keys',
         configured: settingsStore.getConfiguredProviders()
       });
       
       if (aiService) {
-        mainWindow.webContents.send('providers-updated', {
+        sendToAllWindows('providers-updated', {
           providers: aiService.getProvidersInfo(),
           active: aiService.getActiveProvider()
         });
@@ -1078,7 +1531,7 @@ ipcMain.handle('set-ui-settings', async (event, settings) => {
     
     // Notify renderer
     if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('settings-changed', {
+      sendToAllWindows('settings-changed', {
         type: 'ui',
         settings: settingsStore.getUISettings()
       });
@@ -1144,7 +1597,7 @@ ipcMain.handle('set-correction-settings', async (event, settings) => {
     
     // Notify main window of settings change
     if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('correction-settings-changed', settings);
+      sendToAllWindows('correction-settings-changed', settings);
     }
     
     return { success: true };
@@ -1248,7 +1701,7 @@ async function prewarmVoskModel() {
     console.log(`Vosk ${modelSize} model not installed - skipping prewarm`);
     voskPrewarmStatus = 'not_installed';
     if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('vosk-prewarm-status', {
+      sendToAllWindows('vosk-prewarm-status', {
         status: 'not_installed',
         message: 'Model not installed',
         modelSize
@@ -1268,7 +1721,7 @@ async function prewarmVoskModel() {
   
   // Notify renderer of prewarm start
   if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('vosk-prewarm-status', {
+    sendToAllWindows('vosk-prewarm-status', {
       status: 'loading',
       message: `Loading ${modelSize} speech model...`,
       modelSize
@@ -1325,8 +1778,8 @@ async function prewarmVoskModel() {
               
               // Forward status to renderer
               if (mainWindow && !mainWindow.isDestroyed()) {
-                mainWindow.webContents.send('vosk-status', result);
-                mainWindow.webContents.send('vosk-prewarm-status', {
+                sendToAllWindows('vosk-status', result);
+                sendToAllWindows('vosk-prewarm-status', {
                   status: voskPrewarmStatus,
                   message: result.message,
                   modelSize
@@ -1337,7 +1790,7 @@ async function prewarmVoskModel() {
             case 'partial':
               // Real-time partial result - only forward if recording is active in renderer
               if (mainWindow && !mainWindow.isDestroyed()) {
-                mainWindow.webContents.send('vosk-partial', { text: result.text });
+                sendToAllWindows('vosk-partial', { text: result.text });
               }
               break;
               
@@ -1345,7 +1798,7 @@ async function prewarmVoskModel() {
               // Final transcription result
               console.log('Vosk transcription:', result.text, result.speaker_changed ? '(speaker changed)' : '');
               if (mainWindow && !mainWindow.isDestroyed()) {
-                mainWindow.webContents.send('vosk-final', { 
+                sendToAllWindows('vosk-final', { 
                   text: result.text,
                   speaker_changed: result.speaker_changed === true
                 });
@@ -1361,8 +1814,8 @@ async function prewarmVoskModel() {
               console.error('Vosk error:', result.error);
               voskPrewarmStatus = 'error';
               if (mainWindow && !mainWindow.isDestroyed()) {
-                mainWindow.webContents.send('vosk-error', { error: result.error });
-                mainWindow.webContents.send('vosk-prewarm-status', {
+                sendToAllWindows('vosk-error', { error: result.error });
+                sendToAllWindows('vosk-prewarm-status', {
                   status: 'error',
                   message: result.error,
                   modelSize
@@ -1387,8 +1840,8 @@ async function prewarmVoskModel() {
       voskPrewarmStatus = 'idle';
       voskProcess = null;
       if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('vosk-stopped');
-        mainWindow.webContents.send('vosk-prewarm-status', {
+        sendToAllWindows('vosk-stopped');
+        sendToAllWindows('vosk-prewarm-status', {
           status: 'idle',
           message: 'Speech model stopped',
           modelSize
@@ -1403,7 +1856,7 @@ async function prewarmVoskModel() {
       voskPrewarmStatus = 'error';
       voskProcess = null;
       if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('vosk-prewarm-status', {
+        sendToAllWindows('vosk-prewarm-status', {
           status: 'error',
           message: 'Python or Vosk not installed',
           modelSize
@@ -1520,7 +1973,7 @@ ipcMain.handle('download-vosk-model', async (event, requestedModelSize = null) =
     }
     
     // Notify start
-    mainWindow.webContents.send('vosk-download-progress', {
+    sendToAllWindows('vosk-download-progress', {
       status: 'downloading',
       progress: 0,
       message: `Starting download of ${modelSize} model (${modelConfig.sizeDesc})...`,
@@ -1553,7 +2006,7 @@ ipcMain.handle('download-vosk-model', async (event, requestedModelSize = null) =
             
             // Send progress every 2%
             if (voskDownloadProgress % 2 === 0) {
-              mainWindow.webContents.send('vosk-download-progress', {
+              sendToAllWindows('vosk-download-progress', {
                 status: 'downloading',
                 progress: voskDownloadProgress,
                 message: `Downloading ${modelSize}: ${voskDownloadProgress}% (${Math.round(downloadedSize / 1024 / 1024)}MB / ${Math.round(totalSize / 1024 / 1024)}MB)`,
@@ -1566,7 +2019,7 @@ ipcMain.handle('download-vosk-model', async (event, requestedModelSize = null) =
             file.end();
             
             // Extract
-            mainWindow.webContents.send('vosk-download-progress', {
+            sendToAllWindows('vosk-download-progress', {
               status: 'extracting',
               progress: 100,
               message: `Extracting ${modelSize} model...`,
@@ -1585,14 +2038,14 @@ ipcMain.handle('download-vosk-model', async (event, requestedModelSize = null) =
               isDownloadingVoskModel = false;
               voskDownloadProgress = 100;
               
-              mainWindow.webContents.send('vosk-download-progress', {
+              sendToAllWindows('vosk-download-progress', {
                 status: 'complete',
                 progress: 100,
                 message: `${modelSize.charAt(0).toUpperCase() + modelSize.slice(1)} model installed successfully!`,
                 modelSize
               });
               
-              mainWindow.webContents.send('vosk-model-installed', { installed: true, modelSize });
+              sendToAllWindows('vosk-model-installed', { installed: true, modelSize });
               
               resolve({ success: true, message: 'Model installed successfully', modelSize });
               
@@ -1600,7 +2053,7 @@ ipcMain.handle('download-vosk-model', async (event, requestedModelSize = null) =
               console.error('Extract error:', extractError);
               isDownloadingVoskModel = false;
               
-              mainWindow.webContents.send('vosk-download-progress', {
+              sendToAllWindows('vosk-download-progress', {
                 status: 'error',
                 progress: 0,
                 message: `Extract failed: ${extractError.message}`,
@@ -1615,7 +2068,7 @@ ipcMain.handle('download-vosk-model', async (event, requestedModelSize = null) =
             file.end();
             isDownloadingVoskModel = false;
             
-            mainWindow.webContents.send('vosk-download-progress', {
+            sendToAllWindows('vosk-download-progress', {
               status: 'error',
               progress: 0,
               message: `Download failed: ${err.message}`,
@@ -1630,7 +2083,7 @@ ipcMain.handle('download-vosk-model', async (event, requestedModelSize = null) =
       request.on('error', (err) => {
         isDownloadingVoskModel = false;
         
-        mainWindow.webContents.send('vosk-download-progress', {
+        sendToAllWindows('vosk-download-progress', {
           status: 'error',
           progress: 0,
           message: `Download failed: ${err.message}`,
@@ -1672,7 +2125,7 @@ async function extractLocalVoskModel(modelSize) {
       fs.mkdirSync(modelDir, { recursive: true });
     }
     
-    mainWindow.webContents.send('vosk-download-progress', {
+    sendToAllWindows('vosk-download-progress', {
       status: 'extracting',
       progress: 0,
       message: `Extracting local ${modelSize} model...`,
@@ -1693,14 +2146,14 @@ async function extractLocalVoskModel(modelSize) {
     isDownloadingVoskModel = false;
     voskDownloadProgress = 100;
     
-    mainWindow.webContents.send('vosk-download-progress', {
+    sendToAllWindows('vosk-download-progress', {
       status: 'complete',
       progress: 100,
       message: `Local ${modelSize} model extracted successfully!`,
       modelSize
     });
     
-    mainWindow.webContents.send('vosk-model-installed', { installed: true, modelSize });
+    sendToAllWindows('vosk-model-installed', { installed: true, modelSize });
     
     return { success: true, message: `Local ${modelSize} model extracted successfully`, modelSize };
     
@@ -1708,7 +2161,7 @@ async function extractLocalVoskModel(modelSize) {
     console.error('Local model extraction error:', error);
     isDownloadingVoskModel = false;
     
-    mainWindow.webContents.send('vosk-download-progress', {
+    sendToAllWindows('vosk-download-progress', {
       status: 'error',
       progress: 0,
       message: `Extraction failed: ${error.message}`,
@@ -1739,7 +2192,7 @@ ipcMain.handle('delete-vosk-model', async (event, requestedModelSize = null) => 
     // Recursively delete the model directory
     fs.rmSync(modelPath, { recursive: true, force: true });
     
-    mainWindow.webContents.send('vosk-model-installed', { installed: false, modelSize });
+    sendToAllWindows('vosk-model-installed', { installed: false, modelSize });
     
     return { success: true, message: `${modelSize} model deleted`, modelSize };
   } catch (error) {
@@ -1853,7 +2306,7 @@ ipcMain.handle('download-speaker-model', async () => {
     // Send progress to both main window and settings window
     const sendProgress = (data) => {
       if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('speaker-model-progress', data);
+        sendToAllWindows('speaker-model-progress', data);
       }
       if (settingsWindow && !settingsWindow.isDestroyed()) {
         settingsWindow.webContents.send('speaker-model-progress', data);
@@ -1923,7 +2376,7 @@ ipcMain.handle('download-speaker-model', async () => {
               // Notify both windows
               const installedData = { installed: true };
               if (mainWindow && !mainWindow.isDestroyed()) {
-                mainWindow.webContents.send('speaker-model-installed', installedData);
+                sendToAllWindows('speaker-model-installed', installedData);
               }
               if (settingsWindow && !settingsWindow.isDestroyed()) {
                 settingsWindow.webContents.send('speaker-model-installed', installedData);
@@ -1993,7 +2446,7 @@ async function extractLocalSpeakerModel() {
   
   const sendProgress = (data) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('speaker-model-progress', data);
+      sendToAllWindows('speaker-model-progress', data);
     }
     if (settingsWindow && !settingsWindow.isDestroyed()) {
       settingsWindow.webContents.send('speaker-model-progress', data);
@@ -2025,7 +2478,7 @@ async function extractLocalSpeakerModel() {
     
     const installedData = { installed: true };
     if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('speaker-model-installed', installedData);
+      sendToAllWindows('speaker-model-installed', installedData);
     }
     if (settingsWindow && !settingsWindow.isDestroyed()) {
       settingsWindow.webContents.send('speaker-model-installed', installedData);
@@ -2061,7 +2514,7 @@ ipcMain.handle('delete-speaker-model', async () => {
     
     const installedData = { installed: false };
     if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('speaker-model-installed', installedData);
+      sendToAllWindows('speaker-model-installed', installedData);
     }
     if (settingsWindow && !settingsWindow.isDestroyed()) {
       settingsWindow.webContents.send('speaker-model-installed', installedData);
@@ -2119,7 +2572,7 @@ ipcMain.handle('start-voice-recognition', () => {
   // If Vosk is already prewarmed and running, just signal that recording started
   if (isVoskRunning && isVoskPrewarmed) {
     console.log('Vosk already prewarmed and running - recording started');
-    mainWindow.webContents.send('vosk-status', {
+    sendToAllWindows('vosk-status', {
       status: 'listening',
       message: 'Listening...'
     });
@@ -2174,8 +2627,8 @@ ipcMain.handle('start-voice-recognition', () => {
                 voskPrewarmStatus = 'ready';
               }
               
-              mainWindow.webContents.send('vosk-status', result);
-              mainWindow.webContents.send('vosk-prewarm-status', {
+              sendToAllWindows('vosk-status', result);
+              sendToAllWindows('vosk-prewarm-status', {
                 status: voskPrewarmStatus,
                 message: result.message,
                 modelSize
@@ -2184,13 +2637,13 @@ ipcMain.handle('start-voice-recognition', () => {
 
             case 'partial':
               // Real-time partial result
-              mainWindow.webContents.send('vosk-partial', { text: result.text });
+              sendToAllWindows('vosk-partial', { text: result.text });
               break;
 
             case 'final':
               // Final transcription result
               console.log('Vosk transcription:', result.text, result.speaker_changed ? '(speaker changed)' : '');
-              mainWindow.webContents.send('vosk-final', { 
+              sendToAllWindows('vosk-final', { 
                 text: result.text,
                 speaker_changed: result.speaker_changed === true
               });
@@ -2204,7 +2657,7 @@ ipcMain.handle('start-voice-recognition', () => {
             case 'error':
               console.error('Vosk error:', result.error);
               voskPrewarmStatus = 'error';
-              mainWindow.webContents.send('vosk-error', { error: result.error });
+              sendToAllWindows('vosk-error', { error: result.error });
               break;
           }
         } catch (parseError) {
@@ -2223,7 +2676,7 @@ ipcMain.handle('start-voice-recognition', () => {
       isVoskPrewarmed = false;
       voskPrewarmStatus = 'idle';
       voskProcess = null;
-      mainWindow.webContents.send('vosk-stopped');
+      sendToAllWindows('vosk-stopped');
     });
 
     voskProcess.on('error', (error) => {
@@ -2252,7 +2705,7 @@ ipcMain.handle('stop-voice-recognition', () => {
   }
 
   try {
-    mainWindow.webContents.send('vosk-status', {
+    sendToAllWindows('vosk-status', {
       status: 'stopped',
       message: 'Paused listening'
     });

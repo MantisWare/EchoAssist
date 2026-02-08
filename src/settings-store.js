@@ -75,10 +75,39 @@ const schema = {
     type: 'object',
     default: {},
     properties: {
-      theme: { type: 'string', enum: ['light', 'dark', 'system'], default: 'light' },
+      theme: { type: 'string', enum: ['light', 'dark', 'system'], default: 'dark' },
       opacity: { type: 'number', minimum: 0.1, maximum: 1, default: 1 },
       alwaysOnTop: { type: 'boolean', default: true },
-      startMinimized: { type: 'boolean', default: false }
+      startMinimized: { type: 'boolean', default: false },
+      showIconLabels: { type: 'boolean', default: false }
+    }
+  },
+
+  // Phase 6: Panel State Persistence
+  panelState: {
+    type: 'object',
+    default: {},
+    properties: {
+      controlBar: {
+        type: 'object',
+        default: {},
+        properties: {
+          x: { type: 'number' },
+          y: { type: 'number' },
+          width: { type: 'number' }
+        }
+      },
+      transcript: {
+        type: 'object',
+        default: {},
+        properties: {
+          x: { type: 'number' },
+          y: { type: 'number' },
+          width: { type: 'number' },
+          height: { type: 'number' },
+          locked: { type: 'boolean', default: false }
+        }
+      }
     }
   },
   
@@ -101,6 +130,35 @@ const schema = {
     properties: {
       maxCount: { type: 'number', default: 3 },
       captureDelay: { type: 'number', default: 300 }
+    }
+  },
+
+  // Capture Region/Window Settings (Phase 5)
+  capture: {
+    type: 'object',
+    default: {},
+    properties: {
+      mode: { type: 'string', enum: ['fullScreen', 'region', 'window'], default: 'fullScreen' },
+      region: {
+        type: 'object',
+        default: {},
+        properties: {
+          x: { type: 'number', default: 0 },
+          y: { type: 'number', default: 0 },
+          width: { type: 'number', default: 0 },
+          height: { type: 'number', default: 0 }
+        }
+      },
+      window: {
+        type: 'object',
+        default: {},
+        properties: {
+          title: { type: 'string', default: '' },
+          processName: { type: 'string', default: '' },
+          followWindow: { type: 'boolean', default: true }
+        }
+      },
+      monitorIndex: { type: 'number', default: 0 }
     }
   },
   
@@ -271,10 +329,13 @@ class SettingsStore {
    */
   getUISettings() {
     return this.store.get('ui', {
-      theme: 'light',
+      theme: 'dark',
       opacity: 1,
       alwaysOnTop: true,
-      startMinimized: false
+      startMinimized: false,
+      // Phase 6: New UI preferences
+      showIconLabels: false,
+      autoScrollEnabled: true
     });
   }
 
@@ -333,6 +394,46 @@ class SettingsStore {
   }
 
   // ========================================================================
+  // CAPTURE REGION/WINDOW SETTINGS (Phase 5)
+  // ========================================================================
+
+  /**
+   * Get capture config (region/window selection)
+   * @returns {object}
+   */
+  getCaptureConfig() {
+    return this.store.get('capture', {
+      mode: 'fullScreen',
+      region: { x: 0, y: 0, width: 0, height: 0 },
+      window: { title: '', processName: '', followWindow: true },
+      monitorIndex: 0
+    });
+  }
+
+  /**
+   * Set capture config
+   * @param {object} config - Capture configuration
+   */
+  setCaptureConfig(config) {
+    const current = this.getCaptureConfig();
+    this.store.set('capture', { ...current, ...config });
+    console.log('[SettingsStore] Capture config updated:', config);
+  }
+
+  /**
+   * Reset capture mode to full screen
+   */
+  resetCaptureMode() {
+    this.store.set('capture', {
+      mode: 'fullScreen',
+      region: { x: 0, y: 0, width: 0, height: 0 },
+      window: { title: '', processName: '', followWindow: true },
+      monitorIndex: 0
+    });
+    console.log('[SettingsStore] Capture mode reset to fullScreen');
+  }
+
+  // ========================================================================
   // CORRECTION SETTINGS
   // ========================================================================
 
@@ -378,6 +479,39 @@ class SettingsStore {
     console.log('[SettingsStore] Setup marked as completed');
   }
 
+  // ========================================================================
+  // PANEL STATE PERSISTENCE (Phase 6)
+  // ========================================================================
+
+  /**
+   * Get saved panel positions/sizes
+   * @returns {object}
+   */
+  getPanelState() {
+    return this.store.get('panelState', {
+      controlBar: {},
+      transcript: {}
+    });
+  }
+
+  /**
+   * Save panel positions/sizes
+   * @param {object} state - Panel state to save
+   */
+  setPanelState(state) {
+    const current = this.getPanelState();
+    // Deep merge for nested panel objects (controlBar, transcript)
+    const merged = { ...current };
+    if (state.controlBar !== undefined) {
+      merged.controlBar = { ...current.controlBar, ...state.controlBar };
+    }
+    if (state.transcript !== undefined) {
+      merged.transcript = { ...current.transcript, ...state.transcript };
+    }
+    this.store.set('panelState', merged);
+    console.log('[SettingsStore] Panel state updated');
+  }
+
   /**
    * Get all settings (for export/backup)
    * Note: API keys are NOT included for security
@@ -389,7 +523,9 @@ class SettingsStore {
       ui: this.getUISettings(),
       voice: this.getVoiceSettings(),
       screenshot: this.getScreenshotSettings(),
+      capture: this.getCaptureConfig(),
       correction: this.getCorrectionSettings(),
+      panelState: this.getPanelState(),
       hasCompletedSetup: this.hasCompletedSetup(),
       configuredProviders: this.getConfiguredProviders()
     };

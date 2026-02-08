@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Select Region</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: transparent;
+      cursor: crosshair;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+
+    canvas {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    /* Info Panel - shows coordinates and dimensions */
+    .info-panel {
+      position: fixed;
+      top: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0, 0, 0, 0.85);
+      color: #ffffff;
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif;
+      font-size: 13px;
+      font-weight: 500;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      z-index: 100;
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+      pointer-events: none;
+    }
+
+    .info-panel .label {
+      color: rgba(255, 255, 255, 0.6);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .info-panel .value {
+      color: #60a5fa;
+      font-family: 'SF Mono', Monaco, Consolas, monospace;
+      font-weight: 600;
+    }
+
+    .info-panel .divider {
+      width: 1px;
+      height: 16px;
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    /* Instruction text */
+    .instruction {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0, 0, 0, 0.85);
+      color: rgba(255, 255, 255, 0.9);
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif;
+      font-size: 13px;
+      font-weight: 500;
+      z-index: 100;
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+      pointer-events: none;
+      text-align: center;
+    }
+
+    .instruction kbd {
+      background: rgba(255, 255, 255, 0.15);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+
+    /* Confirm / Cancel buttons - appear after selection */
+    .action-buttons {
+      position: fixed;
+      z-index: 200;
+      display: none;
+      gap: 8px;
+      pointer-events: auto;
+    }
+
+    .action-buttons.visible {
+      display: flex;
+    }
+
+    .action-buttons button {
+      padding: 8px 20px;
+      border: none;
+      border-radius: 6px;
+      font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    }
+
+    .action-buttons button:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    }
+
+    .action-buttons button:active {
+      transform: translateY(0);
+    }
+
+    .btn-confirm {
+      background: #22c55e;
+      color: white;
+    }
+
+    .btn-confirm:hover {
+      background: #16a34a;
+    }
+
+    .btn-cancel {
+      background: rgba(255, 255, 255, 0.15);
+      color: white;
+      border: 1px solid rgba(255, 255, 255, 0.3) !important;
+    }
+
+    .btn-cancel:hover {
+      background: rgba(239, 68, 68, 0.8);
+      border-color: rgba(239, 68, 68, 0.8) !important;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="overlay-canvas"></canvas>
+
+  <div class="info-panel" id="info-panel">
+    <span><span class="label">Position </span><span class="value" id="info-pos">0, 0</span></span>
+    <span class="divider"></span>
+    <span><span class="label">Size </span><span class="value" id="info-size">0 × 0</span></span>
+  </div>
+
+  <div class="instruction" id="instruction">
+    Click and drag to select a region. Press <kbd>Esc</kbd> to cancel.
+  </div>
+
+  <div class="action-buttons" id="action-buttons">
+    <button class="btn-confirm" id="btn-confirm">Confirm</button>
+    <button class="btn-cancel" id="btn-cancel">Cancel</button>
+  </div>
+
+  <script src="region-overlay.js"></script>
+</body>
+</html>

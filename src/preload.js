@@ -257,6 +257,80 @@ try {
     },
 
     // ========================================================================
+    // Region/Window Capture Selection (Phase 5)
+    // ========================================================================
+
+    selectCaptureRegion: () => {
+      console.log('PreloadAPI: selectCaptureRegion called');
+      return ipcRenderer.invoke('select-capture-region').catch(err => {
+        console.error('PreloadAPI: selectCaptureRegion error:', err);
+        return { success: false, error: err.message };
+      });
+    },
+
+    getOpenWindows: () => {
+      console.log('PreloadAPI: getOpenWindows called');
+      return ipcRenderer.invoke('get-open-windows').catch(err => {
+        console.error('PreloadAPI: getOpenWindows error:', err);
+        return { success: false, windows: [], error: err.message };
+      });
+    },
+
+    selectCaptureWindow: (windowInfo) => {
+      console.log('PreloadAPI: selectCaptureWindow called');
+      return ipcRenderer.invoke('select-capture-window', windowInfo).catch(err => {
+        console.error('PreloadAPI: selectCaptureWindow error:', err);
+        return { success: false, error: err.message };
+      });
+    },
+
+    resetCaptureMode: () => {
+      console.log('PreloadAPI: resetCaptureMode called');
+      return ipcRenderer.invoke('reset-capture-mode').catch(err => {
+        console.error('PreloadAPI: resetCaptureMode error:', err);
+        return { success: false, error: err.message };
+      });
+    },
+
+    getCaptureConfig: () => {
+      console.log('PreloadAPI: getCaptureConfig called');
+      return ipcRenderer.invoke('get-capture-config').catch(err => {
+        console.error('PreloadAPI: getCaptureConfig error:', err);
+        return { success: false, error: err.message };
+      });
+    },
+
+    onCaptureConfigChanged: (callback) => {
+      const handler = (event, config) => {
+        console.log('PreloadAPI: onCaptureConfigChanged event received');
+        try {
+          callback(config);
+        } catch (err) {
+          console.error('PreloadAPI: onCaptureConfigChanged callback error:', err);
+        }
+      };
+      ipcRenderer.on('capture-config-changed', handler);
+      return () => {
+        ipcRenderer.removeListener('capture-config-changed', handler);
+      };
+    },
+
+    onCaptureWindowNotFound: (callback) => {
+      const handler = (event, title) => {
+        console.log('PreloadAPI: onCaptureWindowNotFound event received');
+        try {
+          callback(title);
+        } catch (err) {
+          console.error('PreloadAPI: onCaptureWindowNotFound callback error:', err);
+        }
+      };
+      ipcRenderer.on('capture-window-not-found', handler);
+      return () => {
+        ipcRenderer.removeListener('capture-window-not-found', handler);
+      };
+    },
+
+    // ========================================================================
     // AI Provider Management
     // ========================================================================
 
@@ -765,11 +839,78 @@ try {
       });
     },
 
+    // Phase 6: Show region menu (native context menu)
+    showRegionMenu: () => {
+      console.log('PreloadAPI: showRegionMenu called');
+      return ipcRenderer.invoke('show-region-menu').catch(err => {
+        console.error('PreloadAPI: showRegionMenu error:', err);
+        return { success: false, error: err.message };
+      });
+    },
+
+    // Phase 6: Broadcast theme change to all windows
+    broadcastThemeChange: (theme) => {
+      console.log('PreloadAPI: broadcastThemeChange called with:', theme);
+      return ipcRenderer.invoke('broadcast-theme-change', theme).catch(err => {
+        console.error('PreloadAPI: broadcastThemeChange error:', err);
+        return { success: false, error: err.message };
+      });
+    },
+
+    // Phase 6: Listen for theme changes from other windows
+    onThemeChanged: (callback) => {
+      const handler = (event, theme) => {
+        console.log('PreloadAPI: onThemeChanged event received:', theme);
+        try {
+          callback(theme);
+        } catch (err) {
+          console.error('PreloadAPI: onThemeChanged callback error:', err);
+        }
+      };
+      ipcRenderer.on('theme-changed', handler);
+      return () => {
+        ipcRenderer.removeListener('theme-changed', handler);
+      };
+    },
+
+    // Phase 6: Listen for window picker open request
+    onOpenWindowPicker: (callback) => {
+      const handler = () => {
+        console.log('PreloadAPI: onOpenWindowPicker event received');
+        try {
+          callback();
+        } catch (err) {
+          console.error('PreloadAPI: onOpenWindowPicker callback error:', err);
+        }
+      };
+      ipcRenderer.on('open-window-picker', handler);
+      return () => {
+        ipcRenderer.removeListener('open-window-picker', handler);
+      };
+    },
+
     // Toggle content protection (screenshot hiding)
     toggleContentProtection: () => {
       console.log('PreloadAPI: toggleContentProtection called');
       return ipcRenderer.invoke('toggle-content-protection').catch(err => {
         console.error('PreloadAPI: toggleContentProtection error:', err);
+        return { success: false, error: err.message };
+      });
+    },
+
+    // Window lock (move/resize toggle)
+    setWindowLocked: (locked) => {
+      console.log('PreloadAPI: setWindowLocked called with:', locked);
+      return ipcRenderer.invoke('set-window-locked', locked).catch(err => {
+        console.error('PreloadAPI: setWindowLocked error:', err);
+        return { success: false, error: err.message };
+      });
+    },
+
+    getWindowLocked: () => {
+      console.log('PreloadAPI: getWindowLocked called');
+      return ipcRenderer.invoke('get-window-locked').catch(err => {
+        console.error('PreloadAPI: getWindowLocked error:', err);
         return { success: false, error: err.message };
       });
     }

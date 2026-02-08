@@ -466,6 +466,47 @@ MIT License - see LICENSE file for details
 - **AI Model**: Google Gemini 1.5 Flash (text + vision + audio)
 - **Framework**: Electron
 
+---
+
+## Development Roadmap
+
+For detailed task checklists, wireframes, and technical specifications, see **[CHECKLIST.md](CHECKLIST.md)**.
+
+### Planned Phases
+
+| Phase | Name | Status | Description |
+|-------|------|--------|-------------|
+| 5 | Screen Region Selection | Implemented | Select specific windows or regions for focused screen capture |
+| 6 | UI/UX Overhaul | In Progress | Modular panel system with floating control bar and chrome-less transcript window |
+
+### Phase 5: Screen Region Selection
+Focus screen captures on specific windows (Teams, Zoom, Meet) or custom regions for better AI analysis, improved privacy, and faster processing.
+
+**Implemented features:**
+- Draw Region overlay (fullscreen transparent canvas with marching ants)
+- Window Picker modal with search/filter and meeting app detection
+- Capture mode badge on screenshot button (dimensions or window name)
+- `Ctrl+Alt+Shift+R` shortcut for region selection
+- Post-capture cropping via `nativeImage.crop()` with DPI/HiDPI support
+- Persistent settings via `electron-store` (mode, region bounds, window title)
+- Window re-detection on each capture (follows moved windows)
+- Visual feedback: mode-specific border flash, window-not-found notifications
+- Edge case handling: multi-monitor clamping, minimized windows, macOS permissions
+
+### Phase 6: UI/UX Overhaul
+Transform the interface into a modular system:
+- **Floating Control Bar** - Separate BrowserWindow with all action buttons, fully draggable
+- **Chrome-less Transcript Window** - No title bar, no traffic lights, no borders; full-height transcript with lock/unlock for position and size
+- **Independent Panels** - Control bar and transcript can be moved independently
+- **Inline Controls** - AI provider selector and auto-scroll indicator inline in transcript header
+- **Optional Icon Labels** - Toggle text labels under icons for discoverability
+- **Close Button** - Exit app from the control bar (no window controls needed)
+- **Dev/Stealth Pill** - Yellow pill for DEV mode, green pill for STEALTH mode
+- **Panel State Persistence** - Window positions saved/restored across sessions
+- **Unified Stealth** - Both windows hide during screenshots and emergency hide
+
+---
+
 ## Support
 
 For issues, questions, or suggestions:

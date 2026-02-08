@@ -89,6 +89,12 @@ const copyBtn = document.getElementById('copy-btn');
 const polishBtn = document.getElementById('polish-btn');
 const closeResultsBtn = document.getElementById('close-results');
 
+// Lock button (window move/resize toggle)
+const lockBtn = document.getElementById('lock-btn');
+const lockIconUnlocked = document.getElementById('lock-icon-unlocked');
+const lockIconLocked = document.getElementById('lock-icon-locked');
+let isWindowLocked = false;
+
 // EchoAssist action buttons
 const suggestBtn = document.getElementById('suggest-btn');
 const notesBtn = document.getElementById('notes-btn');
@@ -146,10 +152,24 @@ let voskModelStatus = {
   isDevelopment: false
 };
 
-// Status bar elements
+// Status bar elements (legacy - being replaced by status toast)
 const statusBarProvider = document.getElementById('status-bar-provider');
 const statusBarVoice = document.getElementById('status-bar-voice');
 const statusBarProgress = document.getElementById('status-bar-progress');
+
+// Phase 6: New control bar elements
+const controlBar = document.getElementById('control-bar');
+const closeBtn = document.getElementById('close-btn');
+const labelsToggle = document.getElementById('labels-toggle');
+const autoScrollIndicator = document.getElementById('auto-scroll-indicator');
+const statusToast = document.getElementById('status-toast');
+const statusToastIcon = document.getElementById('status-toast-icon');
+const statusToastText = document.getElementById('status-toast-text');
+// Phase 6: Drag header removed; transcript-header handles dragging now
+
+// Phase 6: UI state
+let showIconLabels = false;
+let autoScrollEnabled = true;
 const miniProgressFill = document.getElementById('mini-progress-fill');
 const miniProgressText = document.getElementById('mini-progress-text');
 const statusBarMessage = document.getElementById('status-bar-message');
@@ -179,6 +199,9 @@ async function init() {
     await checkVoskModelStatus();
     initializeSummaryPanel();
     await initializeCorrectionSettings();
+    await loadUIPreferences();
+    await initCaptureConfig();
+    initializeAutoScrollIndicator();
     updateUI();
     updateStatusBarProvider();
     updateStatusBarVoice();
@@ -293,7 +316,7 @@ function toggleSummaryPanel() {
 
 async function initializeAppearance() {
     // Load saved theme preference
-    const savedTheme = localStorage.getItem('app-theme') ?? 'light';
+    const savedTheme = localStorage.getItem('app-theme') ?? 'dark';
     setTheme(savedTheme);
 
     // Load saved opacity preference
@@ -412,6 +435,71 @@ function updateDevModePill() {
         }
     } else {
         devModePill.classList.add('hidden');
+    }
+}
+
+// ============================================================================
+// WINDOW LOCK (Move/Resize Toggle)
+// ============================================================================
+
+async function loadWindowLockState() {
+    if (!window.electronAPI || !window.electronAPI.getWindowLocked) return;
+    try {
+        const result = await window.electronAPI.getWindowLocked();
+        if (result.success) {
+            isWindowLocked = result.locked;
+            applyWindowLockUI(isWindowLocked);
+        }
+    } catch (err) {
+        console.error('Failed to load window lock state:', err);
+    }
+}
+
+async function toggleWindowLock() {
+    if (!window.electronAPI || !window.electronAPI.setWindowLocked) {
+        showFeedback('Lock not available', 'error');
+        return;
+    }
+
+    const newLocked = !isWindowLocked;
+    try {
+        const result = await window.electronAPI.setWindowLocked(newLocked);
+        if (result.success) {
+            isWindowLocked = result.locked;
+            applyWindowLockUI(isWindowLocked);
+            showFeedback(isWindowLocked ? 'Window locked' : 'Window unlocked', 'success');
+        }
+    } catch (err) {
+        console.error('Failed to toggle window lock:', err);
+        showFeedback('Lock toggle failed', 'error');
+    }
+}
+
+function applyWindowLockUI(locked) {
+    const header = document.querySelector('.transcript-header');
+    if (header !== null) {
+        if (locked) {
+            header.style.webkitAppRegion = 'no-drag';
+            header.classList.add('locked');
+        } else {
+            header.style.webkitAppRegion = 'drag';
+            header.classList.remove('locked');
+        }
+    }
+
+    if (lockIconUnlocked !== null && lockIconLocked !== null) {
+        if (locked) {
+            lockIconUnlocked.classList.add('hidden');
+            lockIconLocked.classList.remove('hidden');
+        } else {
+            lockIconUnlocked.classList.remove('hidden');
+            lockIconLocked.classList.add('hidden');
+        }
+    }
+
+    if (lockBtn !== null) {
+        lockBtn.title = locked ? 'Unlock window position and size' : 'Lock window position and size';
+        lockBtn.classList.toggle('active', locked);
     }
 }
 
@@ -706,6 +794,20 @@ function updateVoiceUI() {
     } else {
         voiceToggle.classList.remove('active', 'listening');
     }
+    
+    // Update status-dot in control bar
+    const statusDot = document.querySelector('.control-bar-status .status-dot');
+    if (statusDot) {
+        if (isRecording) {
+            statusDot.classList.add('recording');
+            statusDot.classList.remove('ready');
+        } else if (voskModelInstalled && voskIsPrewarmed) {
+            statusDot.classList.remove('recording');
+            statusDot.classList.add('ready');
+        } else {
+            statusDot.classList.remove('recording', 'ready');
+        }
+    }
 }
 
 // Handle Vosk partial results (real-time display)
@@ -854,8 +956,8 @@ function renderTranscript() {
     
     transcriptContent.innerHTML = html;
     
-    // Auto-scroll to bottom
-    transcriptContent.scrollTop = transcriptContent.scrollHeight;
+    // Auto-scroll to bottom (respects user preference)
+    autoScrollTranscript();
 }
 
 function escapeHtml(text) {
@@ -1451,6 +1553,24 @@ function updateUI() {
 function showFeedback(message, type = 'info') {
     console.log(`Feedback (${type}):`, message);
 
+    // Try new status toast first (Phase 6)
+    if (statusToast && statusToastText) {
+        statusToastText.textContent = message;
+        statusToast.className = `status-toast ${type}`;
+        
+        // Clear previous timeout if any
+        if (statusToast._hideTimeout) {
+            clearTimeout(statusToast._hideTimeout);
+        }
+        
+        // Auto-hide after 3 seconds
+        statusToast._hideTimeout = setTimeout(() => {
+            statusToast.classList.add('hidden');
+        }, 3000);
+        return;
+    }
+
+    // Fallback to legacy status text
     if (statusText) {
         statusText.textContent = message;
         statusText.className = `status-text ${type} show`;
@@ -1462,6 +1582,158 @@ function showFeedback(message, type = 'info') {
                 statusText.style.display = 'none';
             }, 300);
         }, 3000);
+    }
+}
+
+// ============================================================================
+// PHASE 6: CONTROL BAR FUNCTIONS
+// ============================================================================
+
+// Note: closeApplication() is defined above in the emergency/close section
+
+/**
+ * Toggle visibility of icon labels in the control bar
+ */
+function toggleIconLabels() {
+    showIconLabels = !showIconLabels;
+    
+    const appContainer = document.getElementById('app');
+    if (appContainer) {
+        if (showIconLabels) {
+            appContainer.classList.add('show-labels');
+        } else {
+            appContainer.classList.remove('show-labels');
+        }
+    }
+    
+    // Update toggle button state
+    if (labelsToggle) {
+        if (showIconLabels) {
+            labelsToggle.classList.add('active');
+        } else {
+            labelsToggle.classList.remove('active');
+        }
+    }
+    
+    // Save preference
+    saveUIPreferences();
+    
+    console.log('Icon labels:', showIconLabels ? 'visible' : 'hidden');
+}
+
+/**
+ * Toggle auto-scroll behavior for transcript
+ */
+function toggleAutoScroll() {
+    autoScrollEnabled = !autoScrollEnabled;
+    
+    // Update indicator
+    if (autoScrollIndicator) {
+        const textEl = autoScrollIndicator.querySelector('.auto-scroll-text');
+        if (textEl) {
+            textEl.textContent = `Auto-scroll: ${autoScrollEnabled ? 'ON' : 'OFF'}`;
+        }
+        
+        if (autoScrollEnabled) {
+            autoScrollIndicator.classList.add('active');
+        } else {
+            autoScrollIndicator.classList.remove('active');
+        }
+    }
+    
+    // If enabling, scroll to bottom immediately
+    if (autoScrollEnabled && transcriptContent) {
+        transcriptContent.scrollTop = transcriptContent.scrollHeight;
+    }
+    
+    // Save preference
+    saveUIPreferences();
+    
+    console.log('Auto-scroll:', autoScrollEnabled ? 'enabled' : 'disabled');
+}
+
+/**
+ * Save UI preferences (labels visibility, auto-scroll)
+ */
+async function saveUIPreferences() {
+    if (!window.electronAPI || !window.electronAPI.setUISettings) return;
+    
+    try {
+        // Use existing UI settings API to store preferences
+        await window.electronAPI.setUISettings({
+            showIconLabels,
+            autoScrollEnabled
+        });
+    } catch (error) {
+        console.log('UI preferences saved locally only:', error.message);
+    }
+}
+
+/**
+ * Load UI preferences
+ */
+async function loadUIPreferences() {
+    if (!window.electronAPI || !window.electronAPI.getUISettings) return;
+    
+    try {
+        const result = await window.electronAPI.getUISettings();
+        const settings = result.settings ?? result;
+        
+        if (settings) {
+            // Apply labels preference
+            if (settings.showIconLabels !== undefined) {
+                showIconLabels = settings.showIconLabels;
+                const appContainer = document.getElementById('app');
+                if (appContainer && showIconLabels) {
+                    appContainer.classList.add('show-labels');
+                }
+                if (labelsToggle && showIconLabels) {
+                    labelsToggle.classList.add('active');
+                }
+            }
+            
+            // Apply auto-scroll preference
+            if (settings.autoScrollEnabled !== undefined) {
+                autoScrollEnabled = settings.autoScrollEnabled;
+                if (autoScrollIndicator) {
+                    const textEl = autoScrollIndicator.querySelector('.auto-scroll-text');
+                    if (textEl) {
+                        textEl.textContent = `Auto-scroll: ${autoScrollEnabled ? 'ON' : 'OFF'}`;
+                    }
+                    if (autoScrollEnabled) {
+                        autoScrollIndicator.classList.add('active');
+                    }
+                }
+            }
+        }
+    } catch (error) {
+        console.log('Could not load UI preferences:', error.message);
+    }
+}
+
+/**
+ * Auto-scroll transcript to bottom if enabled
+ */
+function autoScrollTranscript() {
+    if (autoScrollEnabled && transcriptContent) {
+        requestAnimationFrame(() => {
+            transcriptContent.scrollTop = transcriptContent.scrollHeight;
+        });
+    }
+}
+
+/**
+ * Initialize auto-scroll indicator on startup
+ */
+function initializeAutoScrollIndicator() {
+    if (autoScrollIndicator) {
+        const textEl = autoScrollIndicator.querySelector('.auto-scroll-text');
+        if (textEl) {
+            textEl.textContent = `Auto-scroll: ${autoScrollEnabled ? 'ON' : 'OFF'}`;
+        }
+        if (autoScrollEnabled) {
+            autoScrollIndicator.classList.add('active');
+        }
     }
 }
 
@@ -1763,6 +2035,75 @@ function setupEventListeners() {
         });
     }
 
+    // Window lock button
+    if (lockBtn !== null) {
+        lockBtn.addEventListener('click', toggleWindowLock);
+        // Load saved lock state
+        loadWindowLockState();
+    }
+
+    // Phase 5: Region selection
+    const regionBtn = document.getElementById('region-btn');
+    if (regionBtn) regionBtn.addEventListener('click', toggleRegionContextMenu);
+
+    const regionDraw = document.getElementById('region-draw');
+    if (regionDraw) regionDraw.addEventListener('click', () => {
+      hideRegionContextMenu();
+      if (window.electronAPI) window.electronAPI.selectCaptureRegion();
+    });
+
+    const regionWindow = document.getElementById('region-window');
+    if (regionWindow) regionWindow.addEventListener('click', () => {
+      hideRegionContextMenu();
+      openWindowPicker();
+    });
+
+    const regionFullscreen = document.getElementById('region-fullscreen');
+    if (regionFullscreen) regionFullscreen.addEventListener('click', () => {
+      hideRegionContextMenu();
+      resetCaptureMode();
+    });
+
+    const closeWindowPicker = document.getElementById('close-window-picker');
+    if (closeWindowPicker) closeWindowPicker.addEventListener('click', closeWindowPickerModal);
+
+    const windowSearchInput = document.getElementById('window-search-input');
+    if (windowSearchInput) windowSearchInput.addEventListener('input', filterWindowList);
+
+    // Window picker backdrop click to close
+    const windowPickerModal = document.getElementById('window-picker-modal');
+    if (windowPickerModal) {
+      windowPickerModal.addEventListener('click', (e) => {
+        if (e.target === windowPickerModal) closeWindowPickerModal();
+      });
+    }
+
+    // Close region context menu on click outside
+    document.addEventListener('click', (e) => {
+      const contextMenu = document.getElementById('region-context-menu');
+      const regionBtnEl = document.getElementById('region-btn');
+      if (contextMenu && !contextMenu.classList.contains('hidden') &&
+          !contextMenu.contains(e.target) && e.target !== regionBtnEl &&
+          !regionBtnEl.contains(e.target)) {
+        hideRegionContextMenu();
+      }
+    });
+
+    // Phase 6: Close button (application exit)
+    if (closeBtn) {
+        closeBtn.addEventListener('click', closeApplication);
+    }
+
+    // Phase 6: Labels toggle
+    if (labelsToggle) {
+        labelsToggle.addEventListener('click', toggleIconLabels);
+    }
+
+    // Phase 6: Auto-scroll toggle
+    if (autoScrollIndicator) {
+        autoScrollIndicator.addEventListener('click', toggleAutoScroll);
+    }
+
     // Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
         if (e.ctrlKey && e.altKey && e.shiftKey) {
@@ -1806,8 +2147,29 @@ function setupIpcListeners() {
     window.electronAPI.onScreenshotTakenStealth((count) => {
         screenshotsCount = count;
         updateUI();
-        addChatMessage('screenshot', 'Screenshot captured');
-        showFeedback('Screenshot captured', 'success');
+
+        // Phase 5: Show mode-specific feedback
+        let modeLabel = 'Full Screen';
+        let flashClass = 'flash-full';
+        if (captureMode === 'region') {
+          modeLabel = 'Region';
+          flashClass = 'flash-region';
+        } else if (captureMode === 'window') {
+          modeLabel = 'Window';
+          flashClass = 'flash-window';
+        }
+        addChatMessage('screenshot', `Screenshot captured (${modeLabel})`);
+        showFeedback(`Screenshot captured (${modeLabel})`, 'success');
+
+        // Trigger flash animation
+        const glass = document.querySelector('.glass-container');
+        if (glass !== null) {
+          glass.classList.remove('flash-full', 'flash-region', 'flash-window');
+          // Force reflow to restart animation
+          void glass.offsetWidth;
+          glass.classList.add(flashClass);
+          setTimeout(() => glass.classList.remove(flashClass), 600);
+        }
     });
 
     window.electronAPI.onAnalysisStart(() => {
@@ -1842,6 +2204,38 @@ function setupIpcListeners() {
     window.electronAPI.onError((message) => {
         showFeedback(message, 'error');
     });
+
+    // Phase 5: Capture config changed
+    if (window.electronAPI.onCaptureConfigChanged) {
+      window.electronAPI.onCaptureConfigChanged((config) => {
+        updateCaptureModeBadge(config);
+      });
+    }
+
+    // Phase 5: Window not found notification
+    if (window.electronAPI.onCaptureWindowNotFound) {
+      window.electronAPI.onCaptureWindowNotFound((title) => {
+        const msg = title
+          ? `Target window '${title}' not found — captured full screen instead`
+          : 'Target window not found — captured full screen instead';
+        showFeedback(msg, 'warning');
+        addChatMessage('system', msg);
+      });
+    }
+
+    // Phase 6: Listen for window picker open request from control bar
+    if (window.electronAPI.onOpenWindowPicker) {
+      window.electronAPI.onOpenWindowPicker(() => {
+        openWindowPicker();
+      });
+    }
+
+    // Phase 6: Listen for theme changes broadcast from control bar
+    if (window.electronAPI.onThemeChanged) {
+      window.electronAPI.onThemeChanged((theme) => {
+        document.documentElement.setAttribute('data-theme', theme);
+      });
+    }
 
     // Vosk live transcription event listeners
     window.electronAPI.onVoskStatus((data) => {
@@ -2863,6 +3257,210 @@ async function checkFirstRunSetup() {
     } catch (error) {
         console.error('Failed to check setup status:', error);
     }
+}
+
+// ============================================================================
+// PHASE 5: REGION / WINDOW CAPTURE SELECTION
+// ============================================================================
+
+// Capture mode state
+let captureMode = 'fullScreen';
+
+/**
+ * Toggle the region context menu visibility.
+ */
+function toggleRegionContextMenu() {
+  const menu = document.getElementById('region-context-menu');
+  if (menu === null) return;
+
+  if (menu.classList.contains('hidden')) {
+    // Position near the region button
+    const regionBtn = document.getElementById('region-btn');
+    if (regionBtn !== null) {
+      const rect = regionBtn.getBoundingClientRect();
+      menu.style.left = `${rect.left}px`;
+      menu.style.top = `${rect.bottom + 4}px`;
+    }
+    menu.classList.remove('hidden');
+  } else {
+    menu.classList.add('hidden');
+  }
+}
+
+function hideRegionContextMenu() {
+  const menu = document.getElementById('region-context-menu');
+  if (menu !== null) menu.classList.add('hidden');
+}
+
+/**
+ * Open the window picker modal and populate with open windows.
+ */
+async function openWindowPicker() {
+  const modal = document.getElementById('window-picker-modal');
+  if (modal === null) return;
+
+  modal.classList.remove('hidden');
+
+  // Fetch open windows from main process
+  if (window.electronAPI && window.electronAPI.getOpenWindows) {
+    const result = await window.electronAPI.getOpenWindows();
+    if (result.success) {
+      populateWindowList(result.windows);
+    } else {
+      populateWindowList([]);
+      if (result.error) {
+        showFeedback('Could not list windows: ' + result.error, 'error');
+      }
+    }
+  }
+}
+
+function closeWindowPickerModal() {
+  const modal = document.getElementById('window-picker-modal');
+  if (modal !== null) modal.classList.add('hidden');
+}
+
+/**
+ * Populate the window picker list with available windows.
+ * @param {Array} windows
+ */
+function populateWindowList(windows) {
+  const list = document.getElementById('window-picker-list');
+  if (list === null) return;
+
+  // Keep the "Full Screen" option, remove the rest
+  const fullScreenOption = list.querySelector('.fullscreen-option');
+  list.innerHTML = '';
+  if (fullScreenOption !== null) {
+    list.appendChild(fullScreenOption);
+    fullScreenOption.addEventListener('click', () => {
+      resetCaptureMode();
+      closeWindowPickerModal();
+    });
+  }
+
+  for (const win of windows) {
+    const item = document.createElement('div');
+    item.className = 'window-picker-item';
+    if (win.isMeetingApp) {
+      item.classList.add('meeting-app');
+    }
+    item.dataset.title = win.title;
+    item.dataset.processName = win.processName;
+
+    item.innerHTML = `
+      ${win.isMeetingApp ? '<span class="meeting-dot"></span>' : ''}
+      <span class="window-title">${escapeHtml(win.title)}</span>
+      <span class="window-process">${escapeHtml(win.processName)}</span>
+    `;
+
+    item.addEventListener('click', () => {
+      selectCaptureWindow(win);
+      closeWindowPickerModal();
+    });
+
+    list.appendChild(item);
+  }
+}
+
+/**
+ * Filter the window list based on search input.
+ */
+function filterWindowList() {
+  const input = document.getElementById('window-search-input');
+  const list = document.getElementById('window-picker-list');
+  if (input === null || list === null) return;
+
+  const query = input.value.toLowerCase();
+  const items = list.querySelectorAll('.window-picker-item:not(.fullscreen-option)');
+
+  for (const item of items) {
+    const title = (item.dataset.title ?? '').toLowerCase();
+    const process = (item.dataset.processName ?? '').toLowerCase();
+    const matches = title.includes(query) || process.includes(query);
+    item.style.display = matches ? '' : 'none';
+  }
+}
+
+/**
+ * Select a window for capture.
+ * @param {{ title: string, processName: string }} windowInfo
+ */
+async function selectCaptureWindow(windowInfo) {
+  if (window.electronAPI && window.electronAPI.selectCaptureWindow) {
+    const result = await window.electronAPI.selectCaptureWindow({
+      title: windowInfo.title,
+      processName: windowInfo.processName
+    });
+    if (result.success) {
+      showFeedback(`Capture: ${truncate(windowInfo.title, 30)}`, 'success');
+    }
+  }
+}
+
+/**
+ * Reset capture mode to full screen.
+ */
+async function resetCaptureMode() {
+  if (window.electronAPI && window.electronAPI.resetCaptureMode) {
+    await window.electronAPI.resetCaptureMode();
+    showFeedback('Capture: Full Screen', 'info');
+  }
+}
+
+/**
+ * Update the capture mode badge on the screenshot button.
+ * @param {object} config - The capture configuration
+ */
+function updateCaptureModeBadge(config) {
+  const badge = document.getElementById('capture-mode-badge');
+  if (badge === null) return;
+
+  const mode = config.mode ?? 'fullScreen';
+  captureMode = mode;
+
+  if (mode === 'fullScreen') {
+    badge.style.display = 'none';
+    badge.textContent = '';
+    badge.className = 'capture-mode-badge';
+  } else if (mode === 'region') {
+    const region = config.region ?? {};
+    badge.textContent = `${region.width ?? 0}x${region.height ?? 0}`;
+    badge.className = 'capture-mode-badge badge-region';
+    badge.style.display = '';
+  } else if (mode === 'window') {
+    const win = config.window ?? {};
+    badge.textContent = truncate(win.title ?? win.processName ?? 'Window', 12);
+    badge.className = 'capture-mode-badge badge-window';
+    badge.style.display = '';
+  }
+
+  // Update the region button appearance
+  const regionBtn = document.getElementById('region-btn');
+  if (regionBtn !== null) {
+    regionBtn.classList.toggle('active-region', mode === 'region');
+    regionBtn.classList.toggle('active-window', mode === 'window');
+  }
+}
+
+/**
+ * Load initial capture config on app start.
+ */
+async function initCaptureConfig() {
+  if (window.electronAPI && window.electronAPI.getCaptureConfig) {
+    const result = await window.electronAPI.getCaptureConfig();
+    if (result.success) {
+      updateCaptureModeBadge(result.config);
+    }
+  }
+}
+
+/**
+ * Truncate a string to maxLen characters, appending '...' if truncated.
+ */
+function truncate(str, maxLen) {
+  if (str.length <= maxLen) return str;
+  return str.substring(0, maxLen - 1) + '\u2026';
 }
 
 // Initialize on load
