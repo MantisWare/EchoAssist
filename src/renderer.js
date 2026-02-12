@@ -212,11 +212,11 @@ async function init() {
     isAppInitialized = true;
 
     document.body.style.visibility = 'visible';
-    document.body.style.display = 'block';
+    document.body.style.display = '';
     const app = document.getElementById('app');
     if (app) {
         app.style.visibility = 'visible';
-        app.style.display = 'block';
+        app.style.display = ''; // Clear inline override — CSS flex layout applies
     }
 
     console.log('Renderer initialized - Ready for live transcription!');
@@ -791,8 +791,10 @@ function updateVoiceUI() {
 
     if (isRecording) {
         voiceToggle.classList.add('active', 'listening');
+        voiceToggle.style.background = 'rgba(34, 197, 94, 0.3)'; // Green highlight
     } else {
         voiceToggle.classList.remove('active', 'listening');
+        voiceToggle.style.background = ''; // Clear highlight
     }
     
     // Update status-dot in control bar
@@ -2264,12 +2266,11 @@ function setupIpcListeners() {
                 voskIsPrewarmed = true;
                 voskPrewarmStatus = 'ready';
                 updateVoiceButtonState();
-                // Only show "Model loaded" message if user was waiting for it
-                // (not during silent prewarm at startup)
-                if (isAppInitialized && !voskIsPrewarmed) {
-                    showFeedback('✓ Speech model ready!', 'success');
+                // Only show feedback if user was explicitly waiting
+                if (isAppInitialized) {
+                    showFeedback('Speech model ready - click mic to start', 'success');
                 }
-                // Keep button in "ready to record" state
+                // Ensure button is in "ready to record" state (not active)
                 if (voiceToggle) {
                     voiceToggle.classList.remove('active', 'model-loading');
                     voiceToggle.style.background = '';
@@ -2280,19 +2281,23 @@ function setupIpcListeners() {
                 voskIsPrewarmed = true;
                 voskPrewarmStatus = 'ready';
                 updateVoiceButtonState();
-                // Only show "Listening" message if user is actively recording
+                // Only activate the mic button if the user explicitly started recording
                 if (isRecording) {
                     showFeedback('Listening... Speak now!', 'success');
+                    if (voiceToggle) {
+                        voiceToggle.classList.add('active');
+                        voiceToggle.classList.remove('model-loading');
+                        voiceToggle.style.background = 'rgba(34, 197, 94, 0.3)';
+                    }
                 }
-                if (voiceToggle) {
-                    voiceToggle.classList.add('active');
-                    voiceToggle.classList.remove('model-loading');
-                    voiceToggle.style.background = 'rgba(255, 59, 48, 0.3)';
-                }
+                // If not recording (prewarm), leave button in ready state
                 break;
             case 'stopped':
                 hideLoadingOverlay();
-                showFeedback('Paused listening', 'info');
+                // Only show feedback and update button if user was recording
+                if (isRecording) {
+                    showFeedback('Paused listening', 'info');
+                }
                 if (voiceToggle) {
                     voiceToggle.classList.remove('active');
                     voiceToggle.style.background = '';

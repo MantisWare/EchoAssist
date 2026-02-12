@@ -32,7 +32,7 @@
   const themeToggle = document.getElementById('theme-toggle');
   const transparencySlider = document.getElementById('transparency-slider');
   const transparencyValue = document.getElementById('transparency-value');
-  const captureModeBadge = document.getElementById('capture-mode-badge');
+  // Capture mode badge removed from control bar UI
   const labelsToggle = document.getElementById('labels-toggle');
   const closeBtn = document.getElementById('close-btn');
 
@@ -381,32 +381,16 @@
   }
 
   function updateCaptureModeBadge(config) {
-    if (captureModeBadge === null) return;
-
     const mode = config.mode ?? 'fullScreen';
     captureMode = mode;
-
-    if (mode === 'fullScreen') {
-      captureModeBadge.style.display = 'none';
-      captureModeBadge.className = 'capture-mode-badge';
-    } else if (mode === 'region') {
-      const region = config.region ?? {};
-      captureModeBadge.textContent = `${region.width ?? 0}x${region.height ?? 0}`;
-      captureModeBadge.className = 'capture-mode-badge badge-region';
-      captureModeBadge.style.display = '';
-    } else if (mode === 'window') {
-      const windowConfig = config.window ?? {};
-      const title = windowConfig.title ?? 'Window';
-      captureModeBadge.textContent = title.length > 12 ? title.substring(0, 11) + '\u2026' : title;
-      captureModeBadge.className = 'capture-mode-badge badge-window';
-      captureModeBadge.style.display = '';
-    }
   }
 
   function updateLabelsVisibility() {
-    const labels = document.querySelectorAll('.action-label');
-    for (const label of labels) {
-      label.style.display = showLabels ? '' : 'none';
+    // Use the .show-labels class on the panel to toggle label visibility
+    // This also triggers the CSS rules that resize buttons when labels are shown
+    const panel = document.querySelector('.control-bar-panel');
+    if (panel !== null) {
+      panel.classList.toggle('show-labels', showLabels);
     }
 
     if (labelsToggle !== null) {

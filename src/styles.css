@@ -493,21 +493,18 @@ body {
 
 .action-btn.voice-btn.active {
   color: var(--accent-green);
-  /* Animation removed - was distracting */
 }
 
 .action-btn.voice-btn.listening {
-  color: var(--accent-red);
-  /* Animation removed - was distracting */
+  color: var(--accent-green);
+  /* Green when actively listening/recording */
 }
 
 .action-btn.analyze-btn {
   color: var(--accent-blue);
 }
 
-.action-btn.analyze-btn span {
-  display: none; /* Hide text label, icon only */
-}
+/* Analyze button label visibility is handled by .show-labels toggle */
 
 .action-btn.analyze-btn:hover {
   color: var(--accent-blue-hover);
@@ -2415,8 +2412,8 @@ body {
   margin-top: 0;
   background: var(--bg-secondary);
   backdrop-filter: blur(20px);
-  border: 1px solid var(--border-secondary);
-  border-radius: var(--border-radius-md);
+  border: none; /* Phase 6: No border — parent .glass-container provides styling */
+  border-radius: inherit; /* Inherit from parent .glass-container */
   overflow: hidden;
 }
 
@@ -2437,7 +2434,7 @@ body {
   background: var(--bg-tertiary);
   border-bottom: 1px solid var(--border-secondary);
   backdrop-filter: blur(20px);
-  border-radius: var(--border-radius-md) var(--border-radius-md) 0 0;
+  border-radius: var(--border-radius-lg) 0 0 0; /* Match top-left corner of parent */
   cursor: move;
   -webkit-app-region: drag; /* Draggable header for frameless window */
   flex-shrink: 0;
@@ -2648,7 +2645,7 @@ body {
   padding: 8px 12px;
   background: var(--bg-tertiary);
   border-bottom: 1px solid var(--border-secondary);
-  border-radius: 0 var(--border-radius-md) 0 0;
+  border-radius: 0 var(--border-radius-lg) 0 0; /* Match top-right corner of parent */
 }
 
 .summary-header-title {
@@ -3179,7 +3176,7 @@ body {
 /* Phase 6: Full-height transcript container */
 .transcript-container {
   margin-top: 0;
-  border-radius: var(--border-radius-md);
+  border-radius: inherit; /* Match parent .glass-container */
 }
 
 /* Remove old drag handle styles (replaced by control bar) */

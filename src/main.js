@@ -67,6 +67,33 @@ let voskProcess = null;
 let isVoskRunning = false;
 let isVoskPrewarmed = false;
 let voskPrewarmStatus = 'idle'; // 'idle', 'loading', 'ready', 'error'
+let voskStdoutBuffer = ''; // Buffer for incomplete JSON lines from stdout
+
+/**
+ * Process buffered stdout data from the Vosk Python process.
+ * Handles incomplete JSON lines split across multiple `data` chunks.
+ * @param {string} rawData - Raw data chunk from stdout
+ * @param {function} onParsedLine - Callback for each successfully parsed JSON object
+ */
+function processVoskStdout(rawData, onParsedLine) {
+  voskStdoutBuffer += rawData;
+  const lines = voskStdoutBuffer.split('\n');
+
+  // Keep the last element — it may be an incomplete line
+  voskStdoutBuffer = lines.pop() ?? '';
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0) continue;
+
+    try {
+      const result = JSON.parse(trimmed);
+      onParsedLine(result);
+    } catch (_parseError) {
+      console.error('Failed to parse Vosk output:', trimmed);
+    }
+  }
+}
 
 // Speaker model configuration
 const VOSK_SPEAKER_MODEL = {
@@ -349,7 +376,7 @@ function createStealthWindow() {
  */
 function sendToAllWindows(channel, ...args) {
   if (mainWindow && !mainWindow.isDestroyed()) {
-    sendToAllWindows(channel, ...args);
+    mainWindow.webContents.send(channel, ...args);
   }
   if (controlBarWindow && !controlBarWindow.isDestroyed()) {
     controlBarWindow.webContents.send(channel, ...args);
@@ -1749,82 +1776,61 @@ async function prewarmVoskModel() {
     
     voskProcess = spawn('python', args);
     isVoskRunning = true;
+    voskStdoutBuffer = ''; // Reset buffer for new process
     
-    // Handle stdout (JSON transcription results)
+    // Handle stdout (JSON transcription results) with line buffering
     voskProcess.stdout.on('data', (data) => {
-      const lines = data.toString().split('\n');
-      
-      lines.forEach(line => {
-        if (!line.trim()) return;
-        
-        try {
-          const result = JSON.parse(line);
-          
-          switch (result.type) {
-            case 'status':
-              console.log(`Vosk prewarm status: ${result.status} - ${result.message}`);
-              
-              // Track prewarm status
-              if (result.status === 'ready') {
-                isVoskPrewarmed = true;
-                voskPrewarmStatus = 'ready';
-              } else if (result.status === 'loading') {
-                voskPrewarmStatus = 'loading';
-              } else if (result.status === 'listening') {
-                // Model is prewarmed and listening
-                isVoskPrewarmed = true;
-                voskPrewarmStatus = 'ready';
-              }
-              
-              // Forward status to renderer
-              if (mainWindow && !mainWindow.isDestroyed()) {
-                sendToAllWindows('vosk-status', result);
-                sendToAllWindows('vosk-prewarm-status', {
-                  status: voskPrewarmStatus,
-                  message: result.message,
-                  modelSize
-                });
-              }
-              break;
-              
-            case 'partial':
-              // Real-time partial result - only forward if recording is active in renderer
-              if (mainWindow && !mainWindow.isDestroyed()) {
-                sendToAllWindows('vosk-partial', { text: result.text });
-              }
-              break;
-              
-            case 'final':
-              // Final transcription result
-              console.log('Vosk transcription:', result.text, result.speaker_changed ? '(speaker changed)' : '');
-              if (mainWindow && !mainWindow.isDestroyed()) {
-                sendToAllWindows('vosk-final', { 
-                  text: result.text,
-                  speaker_changed: result.speaker_changed === true
-                });
-              }
-              
-              // Add to AI service history
-              if (aiService && result.text) {
-                aiService.addToHistory('user', result.text);
-              }
-              break;
-              
-            case 'error':
-              console.error('Vosk error:', result.error);
-              voskPrewarmStatus = 'error';
-              if (mainWindow && !mainWindow.isDestroyed()) {
-                sendToAllWindows('vosk-error', { error: result.error });
-                sendToAllWindows('vosk-prewarm-status', {
-                  status: 'error',
-                  message: result.error,
-                  modelSize
-                });
-              }
-              break;
-          }
-        } catch (parseError) {
-          console.error('Failed to parse Vosk output:', line);
+      processVoskStdout(data.toString(), (result) => {
+        switch (result.type) {
+          case 'status':
+            console.log(`Vosk prewarm status: ${result.status} - ${result.message}`);
+            
+            // Track prewarm status
+            if (result.status === 'ready' || result.status === 'listening') {
+              isVoskPrewarmed = true;
+              voskPrewarmStatus = 'ready';
+            } else if (result.status === 'loading') {
+              voskPrewarmStatus = 'loading';
+            }
+            
+            // Forward status to renderer
+            sendToAllWindows('vosk-status', result);
+            sendToAllWindows('vosk-prewarm-status', {
+              status: voskPrewarmStatus,
+              message: result.message,
+              modelSize
+            });
+            break;
+            
+          case 'partial':
+            // Forward partial result — renderer decides whether to display based on isRecording
+            sendToAllWindows('vosk-partial', { text: result.text });
+            break;
+            
+          case 'final':
+            // Forward final result — renderer decides whether to display based on isRecording
+            console.log('Vosk transcription:', result.text, result.speaker_changed ? '(speaker changed)' : '');
+            sendToAllWindows('vosk-final', { 
+              text: result.text,
+              speaker_changed: result.speaker_changed === true
+            });
+            
+            // Add to AI service history
+            if (aiService && result.text) {
+              aiService.addToHistory('user', result.text);
+            }
+            break;
+            
+          case 'error':
+            console.error('Vosk error:', result.error);
+            voskPrewarmStatus = 'error';
+            sendToAllWindows('vosk-error', { error: result.error });
+            sendToAllWindows('vosk-prewarm-status', {
+              status: 'error',
+              message: result.error,
+              modelSize
+            });
+            break;
         }
       });
     });
@@ -2607,61 +2613,50 @@ ipcMain.handle('start-voice-recognition', () => {
 
     voskProcess = spawn('python', args);
     isVoskRunning = true;
+    voskStdoutBuffer = ''; // Reset buffer for new process
 
-    // Handle stdout (JSON transcription results)
+    // Handle stdout (JSON transcription results) with line buffering
     voskProcess.stdout.on('data', (data) => {
-      const lines = data.toString().split('\n');
+      processVoskStdout(data.toString(), (result) => {
+        switch (result.type) {
+          case 'status':
+            console.log(`Vosk status: ${result.status} - ${result.message}`);
+            
+            if (result.status === 'ready' || result.status === 'listening') {
+              isVoskPrewarmed = true;
+              voskPrewarmStatus = 'ready';
+            }
+            
+            sendToAllWindows('vosk-status', result);
+            sendToAllWindows('vosk-prewarm-status', {
+              status: voskPrewarmStatus,
+              message: result.message,
+              modelSize
+            });
+            break;
 
-      lines.forEach(line => {
-        if (!line.trim()) return;
+          case 'partial':
+            sendToAllWindows('vosk-partial', { text: result.text });
+            break;
 
-        try {
-          const result = JSON.parse(line);
+          case 'final':
+            console.log('Vosk transcription:', result.text, result.speaker_changed ? '(speaker changed)' : '');
+            sendToAllWindows('vosk-final', { 
+              text: result.text,
+              speaker_changed: result.speaker_changed === true
+            });
 
-          switch (result.type) {
-            case 'status':
-              console.log(`Vosk status: ${result.status} - ${result.message}`);
-              
-              if (result.status === 'ready' || result.status === 'listening') {
-                isVoskPrewarmed = true;
-                voskPrewarmStatus = 'ready';
-              }
-              
-              sendToAllWindows('vosk-status', result);
-              sendToAllWindows('vosk-prewarm-status', {
-                status: voskPrewarmStatus,
-                message: result.message,
-                modelSize
-              });
-              break;
+            // Add to AI service history
+            if (aiService && result.text) {
+              aiService.addToHistory('user', result.text);
+            }
+            break;
 
-            case 'partial':
-              // Real-time partial result
-              sendToAllWindows('vosk-partial', { text: result.text });
-              break;
-
-            case 'final':
-              // Final transcription result
-              console.log('Vosk transcription:', result.text, result.speaker_changed ? '(speaker changed)' : '');
-              sendToAllWindows('vosk-final', { 
-                text: result.text,
-                speaker_changed: result.speaker_changed === true
-              });
-
-              // Add to AI service history
-              if (aiService && result.text) {
-                aiService.addToHistory('user', result.text);
-              }
-              break;
-
-            case 'error':
-              console.error('Vosk error:', result.error);
-              voskPrewarmStatus = 'error';
-              sendToAllWindows('vosk-error', { error: result.error });
-              break;
-          }
-        } catch (parseError) {
-          console.error('Failed to parse Vosk output:', line);
+          case 'error':
+            console.error('Vosk error:', result.error);
+            voskPrewarmStatus = 'error';
+            sendToAllWindows('vosk-error', { error: result.error });
+            break;
         }
       });
     });
