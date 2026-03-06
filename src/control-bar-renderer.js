@@ -16,6 +16,8 @@
   let screenshotsCount = 0;
   let captureMode = 'fullScreen';
   let showLabels = false;
+  let isCollapsed = false;
+  let expandedWidth = null;
   let timerInterval = null;
   let timerSeconds = 0;
   let currentTheme = 'light';
@@ -35,6 +37,8 @@
   // Capture mode badge removed from control bar UI
   const labelsToggle = document.getElementById('labels-toggle');
   const closeBtn = document.getElementById('close-btn');
+  const collapseToggle = document.getElementById('collapse-toggle');
+  const panel = document.querySelector('.control-bar-panel');
 
   // Action buttons
   const voiceToggle = document.getElementById('voice-toggle');
@@ -47,6 +51,10 @@
   const clearBtn = document.getElementById('clear-btn');
   const hideBtn = document.getElementById('hide-btn');
   const settingsBtn = document.getElementById('settings-btn');
+
+  // Toast
+  const toastEl = document.getElementById('control-bar-toast');
+  let toastTimer = null;
 
   // ========================================================================
   // INITIALIZATION
@@ -89,6 +97,10 @@
         }
         showLabels = uiSettings.showIconLabels === true;
         updateLabelsVisibility();
+
+        if (uiSettings.controlBarCollapsed === true) {
+          toggleCollapsed(true);
+        }
       }
     } catch (err) {
       console.error('[ControlBar] Failed to load UI settings:', err);
@@ -123,9 +135,28 @@
     if (voiceToggle !== null) {
       voiceToggle.addEventListener('click', async () => {
         if (isRecording) {
-          await window.electronAPI.stopVoiceRecognition();
+          try {
+            await window.electronAPI.stopVoiceRecognition();
+            showToast('Mic paused', 'info');
+          } catch (err) {
+            showToast('Failed to stop mic', 'error');
+          }
         } else {
-          await window.electronAPI.startVoiceRecognition();
+          try {
+            showToast('Starting mic...', 'info');
+            const result = await window.electronAPI.startVoiceRecognition();
+            if (result !== undefined && result !== null && result.needsModel) {
+              showToast('Vosk model required — open Settings', 'error');
+              return;
+            }
+            if (result !== undefined && result !== null && result.error) {
+              showToast(result.error, 'error');
+              return;
+            }
+            showToast('Listening...', 'success');
+          } catch (err) {
+            showToast('Failed to start mic', 'error');
+          }
         }
       });
     }
@@ -230,6 +261,14 @@
       });
     }
 
+    // Collapse/Expand toggle
+    if (collapseToggle !== null) {
+      collapseToggle.addEventListener('click', () => {
+        toggleCollapsed(!isCollapsed);
+        window.electronAPI.setUISettings({ controlBarCollapsed: isCollapsed });
+      });
+    }
+
     // Close button
     if (closeBtn !== null) {
       closeBtn.addEventListener('click', () => {
@@ -263,6 +302,13 @@
     if (window.electronAPI.onVoskStopped) {
       window.electronAPI.onVoskStopped(() => {
         setRecordingState(false);
+      });
+    }
+
+    if (window.electronAPI.onVoskError) {
+      window.electronAPI.onVoskError((data) => {
+        setRecordingState(false);
+        showToast('Vosk error: ' + (data.error ?? 'unknown'), 'error');
       });
     }
 
@@ -314,6 +360,26 @@
   // ========================================================================
   // UI UPDATE FUNCTIONS
   // ========================================================================
+
+  function showToast(message, type) {
+    if (toastEl === null) return;
+
+    if (toastTimer !== null) {
+      clearTimeout(toastTimer);
+      toastTimer = null;
+    }
+
+    toastEl.textContent = message;
+    toastEl.className = 'control-bar-toast visible';
+    if (type === 'success' || type === 'error' || type === 'info') {
+      toastEl.classList.add('toast-' + type);
+    }
+
+    toastTimer = setTimeout(() => {
+      toastEl.classList.remove('visible');
+      toastTimer = null;
+    }, 2500);
+  }
 
   function updateScreenshotCount() {
     if (screenshotCountEl !== null) {
@@ -386,15 +452,46 @@
   }
 
   function updateLabelsVisibility() {
-    // Use the .show-labels class on the panel to toggle label visibility
-    // This also triggers the CSS rules that resize buttons when labels are shown
-    const panel = document.querySelector('.control-bar-panel');
     if (panel !== null) {
       panel.classList.toggle('show-labels', showLabels);
     }
 
     if (labelsToggle !== null) {
       labelsToggle.classList.toggle('active', showLabels);
+    }
+  }
+
+  function toggleCollapsed(collapsed) {
+    if (panel === null) return;
+
+    if (collapsed && expandedWidth === null) {
+      expandedWidth = document.documentElement.offsetWidth;
+    }
+
+    isCollapsed = collapsed;
+    panel.classList.toggle('collapsed', collapsed);
+
+    if (collapseToggle !== null) {
+      collapseToggle.title = collapsed
+        ? 'Expand panel (show all controls)'
+        : 'Collapse panel (show essentials only)';
+    }
+
+    resizeWindowToFit(collapsed);
+  }
+
+  function resizeWindowToFit(collapsed) {
+    if (window.electronAPI === undefined || window.electronAPI.resizeControlBar === undefined) {
+      return;
+    }
+
+    if (collapsed) {
+      requestAnimationFrame(() => {
+        const contentWidth = panel.offsetWidth;
+        window.electronAPI.resizeControlBar(contentWidth);
+      });
+    } else {
+      window.electronAPI.resizeControlBar(expandedWidth ?? 800);
     }
   }
 
@@ -437,6 +534,15 @@
   // ========================================================================
   // BOOT
   // ========================================================================
+
+  // Pause CSS animations when control bar is hidden to save GPU cycles
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      document.body.classList.add('animations-paused');
+    } else {
+      document.body.classList.remove('animations-paused');
+    }
+  });
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initialize);

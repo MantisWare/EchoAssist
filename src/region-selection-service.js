@@ -7,6 +7,7 @@
 
 const { nativeImage } = require('electron');
 const fs = require('fs');
+const fsPromises = fs.promises;
 const settingsStore = require('./settings-store');
 
 // Known meeting app process names for highlighting in the window picker
@@ -270,7 +271,7 @@ function resolveWindowBounds(savedConfig) {
  * @param {number} [scaleFactor=1] - Display scale factor
  * @returns {string} The same screenshotPath (for chaining)
  */
-function cropScreenshot(screenshotPath, region, scaleFactor = 1) {
+async function cropScreenshot(screenshotPath, region, scaleFactor = 1) {
   try {
     const image = nativeImage.createFromPath(screenshotPath);
     if (image.isEmpty()) {
@@ -302,7 +303,7 @@ function cropScreenshot(screenshotPath, region, scaleFactor = 1) {
 
     const cropped = image.crop(cropRect);
     const pngBuffer = cropped.toPNG();
-    fs.writeFileSync(screenshotPath, pngBuffer);
+    await fsPromises.writeFile(screenshotPath, pngBuffer);
 
     console.log(
       `[RegionService] Cropped screenshot: ${cropRect.width}x${cropRect.height} ` +

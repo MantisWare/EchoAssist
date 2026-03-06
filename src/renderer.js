@@ -11,6 +11,22 @@ let chatMessagesArray = [];
 let currentPartialText = '';
 let lastPartialMessageDiv = null;
 
+// Memory management constants
+const MAX_TRANSCRIPT_LINES = 500;
+const MAX_CHAT_MESSAGES = 200;
+
+// IPC listener cleanup tracking
+let ipcCleanupFns = [];
+
+// Timeout helper to prevent stuck async flags
+function withTimeout(promise, ms, message = 'Operation timed out') {
+    let timeoutId;
+    const timeout = new Promise((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error(message)), ms);
+    });
+    return Promise.race([promise, timeout]).finally(() => clearTimeout(timeoutId));
+}
+
 // Initialization state
 let isAppInitialized = false;
 
@@ -52,6 +68,14 @@ let correctionEnabled = true;        // User preference (loaded from settings)
 let correctionAccentHint = 'general'; // Accent hint for better corrections
 const CORRECTION_INTERVAL = 30000;   // 30 seconds
 const CORRECTION_BATCH_SIZE = 5;     // Trigger after 5 utterances
+
+// Corrected-flag timer (batched, replaces per-line setTimeout in renderTranscript)
+let correctedFlagTimer = null;
+let correctedLineIndices = new Set();
+
+// Incremental DOM rendering references
+let liveTextElement = null;
+let renderedLineCount = 0;
 
 // DOM elements
 const statusText = document.getElementById('status-text');
@@ -170,6 +194,7 @@ const statusToastText = document.getElementById('status-toast-text');
 // Phase 6: UI state
 let showIconLabels = false;
 let autoScrollEnabled = true;
+let programmaticScroll = false;
 const miniProgressFill = document.getElementById('mini-progress-fill');
 const miniProgressText = document.getElementById('mini-progress-text');
 const statusBarMessage = document.getElementById('status-bar-message');
@@ -197,7 +222,7 @@ async function init() {
     await initializeAppearance();
     await checkDevModeStatus();
     await checkVoskModelStatus();
-    initializeSummaryPanel();
+    await initializeSummaryPanel();
     await initializeCorrectionSettings();
     await loadUIPreferences();
     await initCaptureConfig();
@@ -207,6 +232,15 @@ async function init() {
     updateStatusBarVoice();
     startTimer();
     stealthModeActive = false;
+
+    // Pause CSS animations when page is hidden to save GPU cycles
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            document.body.classList.add('animations-paused');
+        } else {
+            document.body.classList.remove('animations-paused');
+        }
+    });
 
     // Mark initialization complete - "Switched to" messages will now show
     isAppInitialized = true;
@@ -236,11 +270,23 @@ async function init() {
 // SUMMARY PANEL INITIALIZATION
 // ============================================================================
 
-function initializeSummaryPanel() {
-    // Load collapsed state from localStorage
-    const savedState = localStorage.getItem('summary-panel-collapsed');
-    summaryPanelCollapsed = savedState === 'true';
-    
+async function initializeSummaryPanel() {
+    if (window.electronAPI && window.electronAPI.getPanelState) {
+        try {
+            const result = await window.electronAPI.getPanelState();
+            if (result.success && result.state?.summary) {
+                summaryPanelCollapsed = result.state.summary.collapsed === true;
+            }
+        } catch (error) {
+            console.log('Could not load summary panel state from store:', error.message);
+            const fallback = localStorage.getItem('summary-panel-collapsed');
+            summaryPanelCollapsed = fallback === 'true';
+        }
+    } else {
+        const fallback = localStorage.getItem('summary-panel-collapsed');
+        summaryPanelCollapsed = fallback === 'true';
+    }
+
     if (summaryPanelCollapsed && summaryPanel) {
         summaryPanel.classList.add('collapsed');
         if (toggleSummaryBtn) toggleSummaryBtn.textContent = '▶';
@@ -280,12 +326,13 @@ function applyCorrectionSettings(settings) {
         // Manual only - stop the timer
         stopCorrectionTimer();
     } else {
-        // Update the interval constant (can't change const, so we recreate timer)
-        // Note: The timer uses CORRECTION_INTERVAL constant, but we can restart it
-        // For now, we just restart the timer if recording
         if (isRecording && correctionEnabled) {
+            // Restart timer with (potentially) new settings
             stopCorrectionTimer();
             startCorrectionTimer();
+        } else if (isRecording && !correctionEnabled) {
+            // Correction was disabled while recording — stop the running timer
+            stopCorrectionTimer();
         }
     }
     
@@ -306,8 +353,11 @@ function toggleSummaryPanel() {
         toggleSummaryBtn.textContent = summaryPanelCollapsed ? '▶' : '◀';
     }
     
-    // Save state
-    localStorage.setItem('summary-panel-collapsed', summaryPanelCollapsed.toString());
+    if (window.electronAPI && window.electronAPI.savePanelState) {
+        window.electronAPI.savePanelState({ summary: { collapsed: summaryPanelCollapsed } });
+    } else {
+        localStorage.setItem('summary-panel-collapsed', summaryPanelCollapsed.toString());
+    }
 }
 
 // ============================================================================
@@ -738,7 +788,7 @@ async function stopVoiceRecording() {
 
         // Clear any live text display
         currentLiveText = '';
-        renderTranscript();
+        removeLiveTextElement();
         
         // Stop the summarization timer
         stopSummarizeTimer();
@@ -819,29 +869,17 @@ function handleVoskPartial(data) {
     if (!data.text || data.text.trim().length === 0) return;
 
     currentLiveText = data.text.trim();
-    console.log('Partial:', currentLiveText);
 
-    // Update the transcript display with live text
-    renderTranscript();
+    updateLiveText();
 }
 
 // Handle Vosk final results
 function handleVoskFinal(data) {
-    console.log('handleVoskFinal called:', { isRecording, data });
-    
-    // Only process if we're actively recording
-    if (!isRecording) {
-        console.warn('handleVoskFinal: Not recording, ignoring event');
-        return;
-    }
-    if (!data.text || data.text.trim().length === 0) {
-        console.log('handleVoskFinal: Empty text, ignoring');
-        return;
-    }
+    if (!isRecording) return;
+    if (!data.text || data.text.trim().length === 0) return;
 
     const finalText = data.text.trim();
     const speakerChanged = data.speaker_changed === true;
-    console.log('Final:', finalText, speakerChanged ? '(new speaker)' : '');
 
     // Clear live text
     currentLiveText = '';
@@ -854,7 +892,12 @@ function handleVoskFinal(data) {
         timestamp: timestamp,
         speakerChanged: speakerChanged
     });
-    
+
+    // Cap transcript lines to prevent unbounded memory growth
+    if (transcriptLines.length > MAX_TRANSCRIPT_LINES) {
+        transcriptLines = transcriptLines.slice(-MAX_TRANSCRIPT_LINES);
+    }
+
     // Add to buffer for summarization
     transcriptBuffer.push(finalText);
     
@@ -878,10 +921,13 @@ function handleVoskFinal(data) {
         content: finalText,
         timestamp: timestamp
     });
+    if (chatMessagesArray.length > MAX_CHAT_MESSAGES) {
+        chatMessagesArray = chatMessagesArray.slice(-MAX_CHAT_MESSAGES);
+    }
 
-    // Render the updated transcript
-    renderTranscript();
-    
+    // Append the new line incrementally (avoids full DOM rebuild)
+    appendFinalLine(transcriptLines[transcriptLines.length - 1], transcriptLines.length - 1);
+
     showFeedback('Voice captured', 'success');
 }
 
@@ -935,11 +981,24 @@ function renderTranscript() {
             </div>
         `;
         
-        // Clear the corrected flag after rendering (one-time animation)
+        // Track corrected lines for batched flag clearing
         if (line.corrected) {
-            setTimeout(() => { line.corrected = false; }, 2000);
+            correctedLineIndices.add(index);
         }
     });
+
+    // Clear corrected flags with a single timer (replaces per-line setTimeout)
+    if (correctedLineIndices.size > 0) {
+        if (correctedFlagTimer) clearTimeout(correctedFlagTimer);
+        const indicesToClear = new Set(correctedLineIndices);
+        correctedLineIndices.clear();
+        correctedFlagTimer = setTimeout(() => {
+            for (const idx of indicesToClear) {
+                if (transcriptLines[idx]) transcriptLines[idx].corrected = false;
+            }
+            correctedFlagTimer = null;
+        }, 2000);
+    }
     
     // Add live text at the bottom
     if (currentLiveText) {
@@ -957,9 +1016,84 @@ function renderTranscript() {
     }
     
     transcriptContent.innerHTML = html;
-    
+
+    // Sync incremental rendering state after full rebuild
+    renderedLineCount = transcriptLines.length;
+    liveTextElement = transcriptContent.querySelector('.transcript-live')?.closest('.transcript-line') ?? null;
+
     // Auto-scroll to bottom (respects user preference)
     autoScrollTranscript();
+}
+
+// Fast-path: only update the live text element at the bottom (called 10-30x/sec during speech)
+function updateLiveText() {
+    if (!transcriptContent) return;
+    if (renderedLineCount === 0 && transcriptLines.length === 0 && !liveTextElement) {
+        renderTranscript();
+        return;
+    }
+    const nowStr = new Date().toLocaleTimeString('en-US', {
+        hour: '2-digit', minute: '2-digit', second: '2-digit'
+    });
+    if (currentLiveText) {
+        if (liveTextElement) {
+            const textSpan = liveTextElement.querySelector('.transcript-live');
+            const timeSpan = liveTextElement.querySelector('.transcript-line-time');
+            if (textSpan) textSpan.textContent = currentLiveText;
+            if (timeSpan) timeSpan.textContent = nowStr;
+        } else {
+            liveTextElement = document.createElement('div');
+            liveTextElement.className = 'transcript-line';
+            liveTextElement.innerHTML =
+                `<span class="transcript-line-text transcript-live">${escapeHtml(currentLiveText)}</span>` +
+                `<span class="transcript-line-time">${nowStr}</span>`;
+            transcriptContent.appendChild(liveTextElement);
+        }
+    } else if (liveTextElement) {
+        liveTextElement.remove();
+        liveTextElement = null;
+    }
+    autoScrollTranscript();
+}
+
+// Fast-path: append a single finalized transcript line without full rebuild
+function appendFinalLine(line, index) {
+    if (!transcriptContent) return;
+    if (transcriptLines.length === 1 && renderedLineCount === 0) {
+        transcriptContent.innerHTML = '';
+    }
+    if (liveTextElement) {
+        liveTextElement.remove();
+        liveTextElement = null;
+    }
+    if (renderedLineCount >= MAX_TRANSCRIPT_LINES) {
+        renderTranscript();
+        return;
+    }
+    if (line.speakerChanged && index > 0) {
+        const breakDiv = document.createElement('div');
+        breakDiv.className = 'transcript-speaker-break';
+        transcriptContent.appendChild(breakDiv);
+    }
+    const timeStr = line.timestamp.toLocaleTimeString('en-US', {
+        hour: '2-digit', minute: '2-digit', second: '2-digit'
+    });
+    const lineDiv = document.createElement('div');
+    lineDiv.className = 'transcript-line';
+    lineDiv.innerHTML =
+        `<span class="transcript-line-text">${escapeHtml(line.text)}</span>` +
+        `<span class="transcript-line-time">${timeStr}</span>`;
+    transcriptContent.appendChild(lineDiv);
+    renderedLineCount++;
+    autoScrollTranscript();
+}
+
+// Remove the live text element (used when recording stops)
+function removeLiveTextElement() {
+    if (liveTextElement) {
+        liveTextElement.remove();
+        liveTextElement = null;
+    }
 }
 
 function escapeHtml(text) {
@@ -1023,19 +1157,23 @@ async function summarizeTranscript() {
         
         console.log('Summarizing transcript...');
         
-        // Use the AI service to summarize
-        const result = await window.electronAPI.analyzeWithAI(prompt, null);
-        
+        // Use the AI service to summarize (60s timeout to prevent stuck flag)
+        const result = await withTimeout(
+            window.electronAPI.analyzeWithAI(prompt, null),
+            60000,
+            'Summary timed out'
+        );
+
         if (result && result.text) {
             lastSummary = result.text;
             lastSummaryTime = new Date();
-            
+
             renderSummary(result.text);
             updateSummaryTimestamp(lastSummaryTime);
-            
+
             // Clear buffer after successful summarization
             transcriptBuffer = [];
-            
+
             showFeedback('Summary updated', 'success');
         } else if (result && result.error) {
             throw new Error(result.error);
@@ -1262,7 +1400,12 @@ async function correctTranscript(isManual = false) {
         const prompt = buildCorrectionPrompt(utterancesToCorrect);
         
         console.log('Sending correction request to AI...');
-        const result = await window.electronAPI.analyzeWithAI(prompt, null);
+        // 30s timeout to prevent stuck isCorrecting flag
+        const result = await withTimeout(
+            window.electronAPI.analyzeWithAI(prompt, null),
+            30000,
+            'Correction timed out'
+        );
         
         if (result && result.text) {
             // Parse the JSON response
@@ -1393,6 +1536,8 @@ async function clearStealthData() {
         lastSummaryTime = null;
         
         // Reset transcript display
+        renderedLineCount = 0;
+        liveTextElement = null;
         renderTranscript();
         
         // Reset summary display
@@ -1624,33 +1769,33 @@ function toggleIconLabels() {
 }
 
 /**
- * Toggle auto-scroll behavior for transcript
+ * Update the auto-scroll indicator UI to reflect current state
+ */
+function updateAutoScrollIndicator() {
+    if (!autoScrollIndicator) return;
+    const textEl = autoScrollIndicator.querySelector('.auto-scroll-text');
+    if (textEl) {
+        textEl.textContent = `Auto-scroll: ${autoScrollEnabled ? 'ON' : 'OFF'}`;
+    }
+    autoScrollIndicator.classList.toggle('active', autoScrollEnabled);
+}
+
+/**
+ * Toggle auto-scroll behavior for transcript (manual button click)
  */
 function toggleAutoScroll() {
     autoScrollEnabled = !autoScrollEnabled;
+    updateAutoScrollIndicator();
     
-    // Update indicator
-    if (autoScrollIndicator) {
-        const textEl = autoScrollIndicator.querySelector('.auto-scroll-text');
-        if (textEl) {
-            textEl.textContent = `Auto-scroll: ${autoScrollEnabled ? 'ON' : 'OFF'}`;
-        }
-        
-        if (autoScrollEnabled) {
-            autoScrollIndicator.classList.add('active');
-        } else {
-            autoScrollIndicator.classList.remove('active');
-        }
-    }
-    
-    // If enabling, scroll to bottom immediately
     if (autoScrollEnabled && transcriptContent) {
-        transcriptContent.scrollTop = transcriptContent.scrollHeight;
+        programmaticScroll = true;
+        transcriptContent.scrollTo({
+            top: transcriptContent.scrollHeight,
+            behavior: 'smooth'
+        });
     }
     
-    // Save preference
     saveUIPreferences();
-    
     console.log('Auto-scroll:', autoScrollEnabled ? 'enabled' : 'disabled');
 }
 
@@ -1661,7 +1806,6 @@ async function saveUIPreferences() {
     if (!window.electronAPI || !window.electronAPI.setUISettings) return;
     
     try {
-        // Use existing UI settings API to store preferences
         await window.electronAPI.setUISettings({
             showIconLabels,
             autoScrollEnabled
@@ -1682,7 +1826,6 @@ async function loadUIPreferences() {
         const settings = result.settings ?? result;
         
         if (settings) {
-            // Apply labels preference
             if (settings.showIconLabels !== undefined) {
                 showIconLabels = settings.showIconLabels;
                 const appContainer = document.getElementById('app');
@@ -1694,18 +1837,9 @@ async function loadUIPreferences() {
                 }
             }
             
-            // Apply auto-scroll preference
             if (settings.autoScrollEnabled !== undefined) {
                 autoScrollEnabled = settings.autoScrollEnabled;
-                if (autoScrollIndicator) {
-                    const textEl = autoScrollIndicator.querySelector('.auto-scroll-text');
-                    if (textEl) {
-                        textEl.textContent = `Auto-scroll: ${autoScrollEnabled ? 'ON' : 'OFF'}`;
-                    }
-                    if (autoScrollEnabled) {
-                        autoScrollIndicator.classList.add('active');
-                    }
-                }
+                updateAutoScrollIndicator();
             }
         }
     } catch (error) {
@@ -1714,28 +1848,52 @@ async function loadUIPreferences() {
 }
 
 /**
- * Auto-scroll transcript to bottom if enabled
+ * Auto-scroll transcript to bottom if enabled (smooth animation)
  */
 function autoScrollTranscript() {
     if (autoScrollEnabled && transcriptContent) {
+        programmaticScroll = true;
         requestAnimationFrame(() => {
-            transcriptContent.scrollTop = transcriptContent.scrollHeight;
+            transcriptContent.scrollTo({
+                top: transcriptContent.scrollHeight,
+                behavior: 'smooth'
+            });
         });
     }
 }
 
 /**
- * Initialize auto-scroll indicator on startup
+ * Initialize auto-scroll indicator and scroll listener on startup
  */
 function initializeAutoScrollIndicator() {
-    if (autoScrollIndicator) {
-        const textEl = autoScrollIndicator.querySelector('.auto-scroll-text');
-        if (textEl) {
-            textEl.textContent = `Auto-scroll: ${autoScrollEnabled ? 'ON' : 'OFF'}`;
-        }
-        if (autoScrollEnabled) {
-            autoScrollIndicator.classList.add('active');
-        }
+    updateAutoScrollIndicator();
+
+    if (transcriptContent) {
+        transcriptContent.addEventListener('scroll', () => {
+            if (programmaticScroll) {
+                const atBottom = transcriptContent.scrollTop + transcriptContent.clientHeight
+                    >= transcriptContent.scrollHeight - 20;
+                if (atBottom) {
+                    programmaticScroll = false;
+                }
+                return;
+            }
+
+            const atBottom = transcriptContent.scrollTop + transcriptContent.clientHeight
+                >= transcriptContent.scrollHeight - 20;
+
+            if (!atBottom && autoScrollEnabled) {
+                autoScrollEnabled = false;
+                updateAutoScrollIndicator();
+            } else if (atBottom && !autoScrollEnabled) {
+                autoScrollEnabled = true;
+                updateAutoScrollIndicator();
+            }
+        });
+
+        transcriptContent.addEventListener('scrollend', () => {
+            programmaticScroll = false;
+        });
     }
 }
 
@@ -1909,6 +2067,14 @@ function addChatMessage(type, content) {
         timestamp: new Date()
     });
 
+    // Cap chat messages to prevent unbounded memory growth
+    if (chatMessagesArray.length > MAX_CHAT_MESSAGES) {
+        chatMessagesArray = chatMessagesArray.slice(-MAX_CHAT_MESSAGES);
+    }
+    while (chatMessagesElement.children.length > MAX_CHAT_MESSAGES) {
+        chatMessagesElement.removeChild(chatMessagesElement.firstChild);
+    }
+
     // Update UI to enable/disable buttons based on content
     updateUI();
 }
@@ -1924,6 +2090,13 @@ function startTimer() {
         const seconds = (elapsed % 60).toString().padStart(2, '0');
         timerElement.textContent = `${minutes}:${seconds}`;
     }, 1000);
+}
+
+function stopTimer() {
+    if (timerInterval) {
+        clearInterval(timerInterval);
+        timerInterval = null;
+    }
 }
 
 // Event listeners
@@ -2146,7 +2319,11 @@ function setupIpcListeners() {
         return;
     }
 
-    window.electronAPI.onScreenshotTakenStealth((count) => {
+    // Clean up any previously registered listeners (prevents accumulation on reinit)
+    ipcCleanupFns.forEach(fn => { try { fn(); } catch (e) {} });
+    ipcCleanupFns = [];
+
+    ipcCleanupFns.push(window.electronAPI.onScreenshotTakenStealth((count) => {
         screenshotsCount = count;
         updateUI();
 
@@ -2172,15 +2349,15 @@ function setupIpcListeners() {
           glass.classList.add(flashClass);
           setTimeout(() => glass.classList.remove(flashClass), 600);
         }
-    });
+    }));
 
-    window.electronAPI.onAnalysisStart(() => {
+    ipcCleanupFns.push(window.electronAPI.onAnalysisStart(() => {
         setAnalyzing(true);
         showLoadingOverlay();
         addChatMessage('system', 'Analyzing screenshots and context...');
-    });
+    }));
 
-    window.electronAPI.onAnalysisResult((data) => {
+    ipcCleanupFns.push(window.electronAPI.onAnalysisResult((data) => {
         setAnalyzing(false);
         hideLoadingOverlay();
         hideAIActivity();
@@ -2192,55 +2369,55 @@ function setupIpcListeners() {
             addChatMessage('ai-response', data.text);
             showFeedback('Analysis complete', 'success');
         }
-    });
+    }));
 
-    window.electronAPI.onSetStealthMode((enabled) => {
+    ipcCleanupFns.push(window.electronAPI.onSetStealthMode((enabled) => {
         stealthModeActive = enabled;
         showFeedback(enabled ? 'Stealth mode ON' : 'Stealth mode OFF', 'info');
-    });
+    }));
 
-    window.electronAPI.onEmergencyClear(() => {
+    ipcCleanupFns.push(window.electronAPI.onEmergencyClear(() => {
         showEmergencyOverlay();
-    });
+    }));
 
-    window.electronAPI.onError((message) => {
+    ipcCleanupFns.push(window.electronAPI.onError((message) => {
         showFeedback(message, 'error');
-    });
+    }));
 
     // Phase 5: Capture config changed
     if (window.electronAPI.onCaptureConfigChanged) {
-      window.electronAPI.onCaptureConfigChanged((config) => {
+      ipcCleanupFns.push(window.electronAPI.onCaptureConfigChanged((config) => {
         updateCaptureModeBadge(config);
-      });
+      }));
     }
 
     // Phase 5: Window not found notification
     if (window.electronAPI.onCaptureWindowNotFound) {
-      window.electronAPI.onCaptureWindowNotFound((title) => {
+      ipcCleanupFns.push(window.electronAPI.onCaptureWindowNotFound((title) => {
         const msg = title
           ? `Target window '${title}' not found — captured full screen instead`
           : 'Target window not found — captured full screen instead';
         showFeedback(msg, 'warning');
         addChatMessage('system', msg);
-      });
+      }));
     }
 
     // Phase 6: Listen for window picker open request from control bar
     if (window.electronAPI.onOpenWindowPicker) {
-      window.electronAPI.onOpenWindowPicker(() => {
+      ipcCleanupFns.push(window.electronAPI.onOpenWindowPicker(() => {
         openWindowPicker();
-      });
+      }));
     }
 
     // Phase 6: Listen for theme changes broadcast from control bar
     if (window.electronAPI.onThemeChanged) {
-      window.electronAPI.onThemeChanged((theme) => {
+      ipcCleanupFns.push(window.electronAPI.onThemeChanged((theme) => {
         document.documentElement.setAttribute('data-theme', theme);
-      });
+      }));
     }
 
     // Vosk live transcription event listeners
-    window.electronAPI.onVoskStatus((data) => {
+    ipcCleanupFns.push(window.electronAPI.onVoskStatus((data) => {
         console.log('Vosk status:', data.status, '-', data.message);
 
         switch (data.status) {
@@ -2281,21 +2458,37 @@ function setupIpcListeners() {
                 voskIsPrewarmed = true;
                 voskPrewarmStatus = 'ready';
                 updateVoiceButtonState();
-                // Only activate the mic button if the user explicitly started recording
-                if (isRecording) {
-                    showFeedback('Listening... Speak now!', 'success');
-                    if (voiceToggle) {
-                        voiceToggle.classList.add('active');
-                        voiceToggle.classList.remove('model-loading');
-                        voiceToggle.style.background = 'rgba(34, 197, 94, 0.3)';
-                    }
+
+                if (!isRecording) {
+                    isRecording = true;
+                    updateVoiceUI();
+                    updateStatusBarVoice();
+                    startSummarizeTimer();
+                    startCorrectionTimer();
                 }
-                // If not recording (prewarm), leave button in ready state
+                showFeedback('Listening... Speak now!', 'success');
+                if (voiceToggle) {
+                    voiceToggle.classList.add('active');
+                    voiceToggle.classList.remove('model-loading');
+                    voiceToggle.style.background = 'rgba(34, 197, 94, 0.3)';
+                }
                 break;
             case 'stopped':
                 hideLoadingOverlay();
-                // Only show feedback and update button if user was recording
                 if (isRecording) {
+                    isRecording = false;
+                    updateVoiceUI();
+                    updateStatusBarVoice();
+                    currentLiveText = '';
+                    removeLiveTextElement();
+                    stopSummarizeTimer();
+                    stopCorrectionTimer();
+                    if (correctionBuffer.length > 0 && correctionEnabled) {
+                        correctTranscript(false);
+                    }
+                    if (transcriptBuffer.length > 0) {
+                        summarizeTranscript();
+                    }
                     showFeedback('Paused listening', 'info');
                 }
                 if (voiceToggle) {
@@ -2304,48 +2497,51 @@ function setupIpcListeners() {
                 }
                 break;
         }
-    });
+    }));
 
-    window.electronAPI.onVoskPartial((data) => {
-        console.log('onVoskPartial IPC received:', data);
+    ipcCleanupFns.push(window.electronAPI.onVoskPartial((data) => {
         handleVoskPartial(data);
-    });
+    }));
 
-    window.electronAPI.onVoskFinal((data) => {
-        console.log('onVoskFinal IPC received:', data);
+    ipcCleanupFns.push(window.electronAPI.onVoskFinal((data) => {
         handleVoskFinal(data);
-    });
+    }));
 
-    window.electronAPI.onVoskError((data) => {
+    ipcCleanupFns.push(window.electronAPI.onVoskError((data) => {
         console.error('Vosk error:', data.error);
         showFeedback(`Vosk error: ${data.error}`, 'error');
         addChatMessage('system', `Vosk error: ${data.error}`);
 
-        // Stop recording on error
         if (isRecording) {
             isRecording = false;
             updateVoiceUI();
             updateStatusBarVoice();
+            stopSummarizeTimer();
+            stopCorrectionTimer();
             if (voiceToggle) {
                 voiceToggle.classList.remove('active');
             }
         }
-    });
+    }));
 
-    window.electronAPI.onVoskStopped(() => {
+    ipcCleanupFns.push(window.electronAPI.onVoskStopped(() => {
         console.log('Vosk stopped');
         if (isRecording) {
             isRecording = false;
             updateVoiceUI();
             updateStatusBarVoice();
+            currentLiveText = '';
+            removeLiveTextElement();
+            stopSummarizeTimer();
+            stopCorrectionTimer();
             if (voiceToggle) {
                 voiceToggle.classList.remove('active');
             }
         }
-    });
+    }));
 
     // Provider change event
-    window.electronAPI.onProviderChanged((data) => {
+    ipcCleanupFns.push(window.electronAPI.onProviderChanged((data) => {
         console.log('Provider changed to:', data.provider);
         currentProvider = data.provider;
         updateProviderSelection();
@@ -2357,20 +2553,20 @@ function setupIpcListeners() {
             showFeedback(`Provider: ${displayName}`, 'info');
             setStatusBarMessage(`Switched to ${displayName}`, 3000);
         }
-    });
+    }));
 
     // Settings change events
     if (window.electronAPI.onSettingsChanged) {
-        window.electronAPI.onSettingsChanged((data) => {
+        ipcCleanupFns.push(window.electronAPI.onSettingsChanged((data) => {
             console.log('Settings changed:', data);
             if (data.type === 'api-keys') {
                 updateApiKeyStatusIndicators(data.configured);
             }
-        });
+        }));
     }
 
     if (window.electronAPI.onProvidersUpdated) {
-        window.electronAPI.onProvidersUpdated((data) => {
+        ipcCleanupFns.push(window.electronAPI.onProvidersUpdated((data) => {
             console.log('Providers updated:', data);
             availableProviders = data.providers || [];
             updateProviderDropdown();
@@ -2378,40 +2574,40 @@ function setupIpcListeners() {
                 currentProvider = data.active;
                 updateProviderSelection();
             }
-        });
+        }));
     }
 
     // Correction settings change events
     if (window.electronAPI.onCorrectionSettingsChanged) {
-        window.electronAPI.onCorrectionSettingsChanged((data) => {
+        ipcCleanupFns.push(window.electronAPI.onCorrectionSettingsChanged((data) => {
             console.log('Correction settings changed:', data);
             applyCorrectionSettings(data);
-        });
+        }));
     }
 
     // Vosk download progress events
     if (window.electronAPI.onVoskDownloadProgress) {
-        window.electronAPI.onVoskDownloadProgress((data) => {
+        ipcCleanupFns.push(window.electronAPI.onVoskDownloadProgress((data) => {
             console.log('Vosk download progress:', data);
             updateVoskDownloadProgress(data);
-        });
+        }));
     }
 
     if (window.electronAPI.onVoskModelInstalled) {
-        window.electronAPI.onVoskModelInstalled((data) => {
+        ipcCleanupFns.push(window.electronAPI.onVoskModelInstalled((data) => {
             console.log('Vosk model installed status:', data);
             voskModelInstalled = data.installed;
             updateVoiceButtonState();
             updateVoskSettingsUI();
-        });
+        }));
     }
 
     // Vosk prewarm status events
     if (window.electronAPI.onVoskPrewarmStatus) {
-        window.electronAPI.onVoskPrewarmStatus((data) => {
+        ipcCleanupFns.push(window.electronAPI.onVoskPrewarmStatus((data) => {
             console.log('Vosk prewarm status:', data);
             handleVoskPrewarmStatus(data);
-        });
+        }));
     }
 }
 
@@ -3467,6 +3663,33 @@ function truncate(str, maxLen) {
   if (str.length <= maxLen) return str;
   return str.substring(0, maxLen - 1) + '\u2026';
 }
+
+// ============================================================================
+// RESOURCE CLEANUP
+// ============================================================================
+
+/**
+ * Clean up all resources on page unload to prevent memory leaks.
+ * Stops timers, removes IPC listeners, clears pending timeouts.
+ */
+function cleanupResources() {
+    // Remove IPC listeners
+    ipcCleanupFns.forEach(fn => { try { fn(); } catch (e) {} });
+    ipcCleanupFns = [];
+
+    // Stop all timers
+    stopTimer();
+    stopSummarizeTimer();
+    stopCorrectionTimer();
+
+    // Clear corrected-flag timer
+    if (correctedFlagTimer) {
+        clearTimeout(correctedFlagTimer);
+        correctedFlagTimer = null;
+    }
+}
+
+window.addEventListener('beforeunload', cleanupResources);
 
 // Initialize on load
 if (document.readyState === 'loading') {

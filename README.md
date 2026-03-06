@@ -62,7 +62,7 @@ A powerful, **100% undetectable** AI meeting assistant. This Electron desktop ap
 
 ### Prerequisites
 
-- **Node.js** 16+ (Download from [nodejs.org](https://nodejs.org/))
+- **Node.js** 16+ (Download from [nodejs.org](https://nodejs.org/)) with **pnpm** (Install via `npm install -g pnpm`)
 - **Python 3.8+** (Download from [python.org](https://www.python.org/))
 - **Python packages**: `vosk`, `sounddevice`, `requests` (see [SETUP-VOSK.md](SETUP-VOSK.md))
 - **At least one AI API Key** (choose one or more):
@@ -83,7 +83,7 @@ A powerful, **100% undetectable** AI meeting assistant. This Electron desktop ap
 
 2. **Install Node.js dependencies**
    ```bash
-   npm install
+   pnpm install
    ```
 
 3. **Install Python dependencies for Vosk**
@@ -115,7 +115,7 @@ A powerful, **100% undetectable** AI meeting assistant. This Electron desktop ap
 
 5. **Run the application**
    ```bash
-   npm start
+   pnpm start
    ```
 
 6. **First run - Model setup**
@@ -317,7 +317,7 @@ recognition.maxAlternatives = 1;    // Number of alternatives per result
 ### Build standalone application
 
 ```bash
-npm run build
+pnpm build
 ```
 
 This creates installers in the `dist` folder:
@@ -329,13 +329,13 @@ This creates installers in the `dist` folder:
 
 ```bash
 # Windows only
-npm run build -- --win
+pnpm build --win
 
 # Mac only
-npm run build -- --mac
+pnpm build --mac
 
 # Linux only
-npm run build -- --linux
+pnpm build --linux
 ```
 
 ## Troubleshooting
@@ -366,7 +366,7 @@ npm run build -- --linux
 1. **Check if running**: Look for process in Task Manager
 2. **Position**: Try Ctrl+Alt+Shift+Arrow keys to move it
 3. **Opacity**: Press Ctrl+Alt+Shift+H to toggle opacity
-4. **Logs**: Run with `npm run dev` to see console output
+4. **Logs**: Run with `pnpm dev` to see console output
 
 ## Privacy & Ethics
 

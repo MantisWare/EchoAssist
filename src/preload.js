@@ -2,6 +2,26 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 console.log('Preload script loading...');
 
+// Input validation helpers for security-sensitive IPC calls
+const VALID_PROVIDERS = new Set(['gemini', 'openai', 'anthropic', 'openrouter']);
+const VALID_MODEL_SIZES = new Set(['small', 'medium', 'large']);
+const VALID_THEMES = new Set(['light', 'dark', 'system']);
+
+function validateProvider(provider) {
+  if (typeof provider !== 'string' || !VALID_PROVIDERS.has(provider)) {
+    throw new Error(`Invalid provider: ${provider}. Must be one of: ${[...VALID_PROVIDERS].join(', ')}`);
+  }
+}
+
+function validateString(value, name, maxLength = 10000) {
+  if (typeof value !== 'string') {
+    throw new Error(`${name} must be a string`);
+  }
+  if (value.length > maxLength) {
+    throw new Error(`${name} exceeds maximum length of ${maxLength}`);
+  }
+}
+
 // Expose stealth API to renderer process with enhanced error handling
 try {
   contextBridge.exposeInMainWorld('electronAPI', {
@@ -39,6 +59,12 @@ try {
     },
     
     analyzeStealthWithContext: (context) => {
+      try {
+        validateString(context, 'context', 50000);
+      } catch (err) {
+        console.error('PreloadAPI: analyzeStealthWithContext validation error:', err.message);
+        return Promise.resolve({ error: err.message });
+      }
       console.log('PreloadAPI: analyzeStealthWithContext called with context length:', context?.length || 0);
       return ipcRenderer.invoke('analyze-stealth-with-context', context).catch(err => {
         console.error('PreloadAPI: analyzeStealthWithContext error:', err);
@@ -88,6 +114,10 @@ try {
     },
 
     setVoskModelSize: (modelSize) => {
+      if (typeof modelSize !== 'string' || !VALID_MODEL_SIZES.has(modelSize)) {
+        console.error('PreloadAPI: setVoskModelSize invalid size:', modelSize);
+        return Promise.resolve({ success: false, error: `Invalid model size: ${modelSize}. Must be one of: ${[...VALID_MODEL_SIZES].join(', ')}` });
+      }
       console.log('PreloadAPI: setVoskModelSize called with:', modelSize);
       return ipcRenderer.invoke('set-vosk-model-size', modelSize).catch(err => {
         console.error('PreloadAPI: setVoskModelSize error:', err);
@@ -351,6 +381,12 @@ try {
     },
 
     setActiveProvider: (provider) => {
+      try {
+        validateProvider(provider);
+      } catch (err) {
+        console.error('PreloadAPI: setActiveProvider validation error:', err.message);
+        return Promise.resolve({ success: false, error: err.message });
+      }
       console.log('PreloadAPI: setActiveProvider called with:', provider);
       return ipcRenderer.invoke('set-active-provider', provider).catch(err => {
         console.error('PreloadAPI: setActiveProvider error:', err);
@@ -396,6 +432,13 @@ try {
     },
 
     setApiKey: (provider, apiKey) => {
+      try {
+        validateProvider(provider);
+        validateString(apiKey, 'apiKey', 256);
+      } catch (err) {
+        console.error('PreloadAPI: setApiKey validation error:', err.message);
+        return Promise.resolve({ success: false, error: err.message });
+      }
       console.log('PreloadAPI: setApiKey called for:', provider);
       return ipcRenderer.invoke('set-api-key', { provider, apiKey }).catch(err => {
         console.error('PreloadAPI: setApiKey error:', err);
@@ -404,6 +447,12 @@ try {
     },
 
     clearApiKey: (provider) => {
+      try {
+        validateProvider(provider);
+      } catch (err) {
+        console.error('PreloadAPI: clearApiKey validation error:', err.message);
+        return Promise.resolve({ success: false, error: err.message });
+      }
       console.log('PreloadAPI: clearApiKey called for:', provider);
       return ipcRenderer.invoke('clear-api-key', provider).catch(err => {
         console.error('PreloadAPI: clearApiKey error:', err);
@@ -436,6 +485,20 @@ try {
     },
 
     setUISettings: (settings) => {
+      if (settings === null || typeof settings !== 'object' || Array.isArray(settings)) {
+        console.error('PreloadAPI: setUISettings invalid settings:', typeof settings);
+        return Promise.resolve({ success: false, error: 'settings must be a plain object' });
+      }
+      if (settings.theme !== undefined && !VALID_THEMES.has(settings.theme)) {
+        console.error('PreloadAPI: setUISettings invalid theme:', settings.theme);
+        return Promise.resolve({ success: false, error: `Invalid theme: ${settings.theme}` });
+      }
+      if (settings.opacity !== undefined) {
+        if (typeof settings.opacity !== 'number' || settings.opacity < 0.1 || settings.opacity > 1) {
+          console.error('PreloadAPI: setUISettings invalid opacity:', settings.opacity);
+          return Promise.resolve({ success: false, error: 'Opacity must be a number between 0.1 and 1' });
+        }
+      }
       console.log('PreloadAPI: setUISettings called');
       return ipcRenderer.invoke('set-ui-settings', settings).catch(err => {
         console.error('PreloadAPI: setUISettings error:', err);
@@ -710,7 +773,6 @@ try {
 
     onVoskPartial: (callback) => {
       const handler = (event, data) => {
-        console.log('PreloadAPI: onVoskPartial event received');
         try {
           callback(data);
         } catch (err) {
@@ -719,14 +781,12 @@ try {
       };
       ipcRenderer.on('vosk-partial', handler);
       return () => {
-        console.log('PreloadAPI: removing onVoskPartial listener');
         ipcRenderer.removeListener('vosk-partial', handler);
       };
     },
 
     onVoskFinal: (callback) => {
       const handler = (event, data) => {
-        console.log('PreloadAPI: onVoskFinal event received');
         try {
           callback(data);
         } catch (err) {
@@ -735,7 +795,6 @@ try {
       };
       ipcRenderer.on('vosk-final', handler);
       return () => {
-        console.log('PreloadAPI: removing onVoskFinal listener');
         ipcRenderer.removeListener('vosk-final', handler);
       };
     },
@@ -804,6 +863,10 @@ try {
     // ========================================================================
 
     setWindowOpacity: (opacity) => {
+      if (typeof opacity !== 'number' || opacity < 0.1 || opacity > 1.0) {
+        console.error('PreloadAPI: setWindowOpacity invalid value:', opacity);
+        return Promise.resolve({ success: false, error: 'Opacity must be a number between 0.1 and 1.0' });
+      }
       console.log('PreloadAPI: setWindowOpacity called with:', opacity);
       return ipcRenderer.invoke('set-window-opacity', opacity).catch(err => {
         console.error('PreloadAPI: setWindowOpacity error:', err);
@@ -815,6 +878,13 @@ try {
       console.log('PreloadAPI: getWindowOpacity called');
       return ipcRenderer.invoke('get-window-opacity').catch(err => {
         console.error('PreloadAPI: getWindowOpacity error:', err);
+        return { success: false, error: err.message };
+      });
+    },
+
+    resizeControlBar: (width) => {
+      return ipcRenderer.invoke('resize-control-bar', width).catch(err => {
+        console.error('PreloadAPI: resizeControlBar error:', err);
         return { success: false, error: err.message };
       });
     },
@@ -850,6 +920,10 @@ try {
 
     // Phase 6: Broadcast theme change to all windows
     broadcastThemeChange: (theme) => {
+      if (typeof theme !== 'string' || !VALID_THEMES.has(theme)) {
+        console.error('PreloadAPI: broadcastThemeChange invalid theme:', theme);
+        return Promise.resolve({ success: false, error: `Invalid theme: ${theme}. Must be one of: ${[...VALID_THEMES].join(', ')}` });
+      }
       console.log('PreloadAPI: broadcastThemeChange called with:', theme);
       return ipcRenderer.invoke('broadcast-theme-change', theme).catch(err => {
         console.error('PreloadAPI: broadcastThemeChange error:', err);
@@ -894,6 +968,23 @@ try {
       console.log('PreloadAPI: toggleContentProtection called');
       return ipcRenderer.invoke('toggle-content-protection').catch(err => {
         console.error('PreloadAPI: toggleContentProtection error:', err);
+        return { success: false, error: err.message };
+      });
+    },
+
+    // Phase 6: Panel state persistence
+    getPanelState: () => {
+      console.log('PreloadAPI: getPanelState called');
+      return ipcRenderer.invoke('get-panel-state').catch(err => {
+        console.error('PreloadAPI: getPanelState error:', err);
+        return { success: false, state: {}, error: err.message };
+      });
+    },
+
+    savePanelState: (state) => {
+      console.log('PreloadAPI: savePanelState called');
+      return ipcRenderer.invoke('save-panel-state', state).catch(err => {
+        console.error('PreloadAPI: savePanelState error:', err);
         return { success: false, error: err.message };
       });
     },

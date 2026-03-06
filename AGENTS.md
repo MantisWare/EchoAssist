@@ -14,38 +14,38 @@ This document guides AI agents working on the EchoAssist codebase.
 ## 1. Build, Run, and Test Commands
 
 ### Prerequisites
-- Node.js & npm installed.
+- Node.js & pnpm installed.
 - Python 3 installed (for `transcribe.py` and `vosk_live.py`).
 - `.env` file in root with `GEMINI_API_KEY`.
 
 ### Commands
 - **Install Dependencies:**
   ```bash
-  npm install
-  npm run postinstall  # Installs native dependencies
+  pnpm install
+  # postinstall runs automatically (electron-builder install-app-deps)
   ```
 
 - **Development (Run Source):**
   ```bash
-  npm start
+  pnpm start
   # OR
-  npm run dev  # Enables logging
+  pnpm dev  # Enables logging
   ```
 
 - **Build for Production (Portable Windows):**
   ```bash
-  npm run build -- --win portable
+  pnpm build --win portable
   ```
 
 - **Build for Production (Installer):**
   ```bash
-  npm run build -- --win nsis
+  pnpm build --win nsis
   ```
 
 ### Testing
 - **Automated Tests:** There are currently **NO** automated unit or integration tests configured in `package.json`.
 - **Manual Testing:**
-  - Launch the app using `npm start`.
+  - Launch the app using `pnpm start`.
   - Verify stealth mode triggers (Ctrl+Alt+Shift+H).
   - Verify screenshot analysis (Ctrl+Alt+Shift+A).
   - Check console output for errors.

@@ -476,6 +476,19 @@ body {
   transform: scale(0.95);
 }
 
+.action-btn:focus-visible,
+.icon-btn:focus-visible,
+.control-btn:focus-visible,
+.theme-toggle:focus-visible,
+.dev-mode-pill:focus-visible,
+.labels-btn:focus-visible,
+.close-btn:focus-visible {
+  outline: 2px solid var(--accent-blue);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.2);
+  border-radius: var(--border-radius-sm);
+}
+
 .action-btn svg {
   width: 20px;
   height: 20px;
@@ -2532,6 +2545,7 @@ body {
 .transcript-content {
   flex: 1;
   overflow-y: auto;
+  scroll-behavior: smooth;
   padding: 12px;
   font-size: 13px;
   line-height: 1.6;
@@ -3072,6 +3086,85 @@ body {
   height: 16px;
 }
 
+/* --- Prominent Mic Button --- */
+.control-bar-actions .action-btn.voice-btn {
+  min-width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 2px solid var(--accent-green);
+  position: relative;
+  margin-right: 4px;
+}
+
+.control-bar-actions .action-btn.voice-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+.control-bar-actions .action-btn.voice-btn:hover {
+  background: rgba(34, 197, 94, 0.15);
+}
+
+.control-bar-actions .action-btn.voice-btn.active {
+  background: rgba(34, 197, 94, 0.25);
+  border-color: var(--accent-green-hover);
+  color: #fff;
+  animation: mic-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes mic-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.5); }
+  50%  { box-shadow: 0 0 0 8px rgba(34, 197, 94, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+}
+
+.control-bar-actions .action-btn.voice-btn.model-required {
+  border-color: var(--text-tertiary);
+  animation: none;
+}
+
+/* --- Control Bar Toast --- */
+.control-bar-toast {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) scale(0.92);
+  padding: 4px 16px;
+  border-radius: var(--border-radius-sm);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  z-index: 200;
+  backdrop-filter: blur(16px);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-secondary);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-md);
+}
+
+.control-bar-toast.visible {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+}
+
+.control-bar-toast.toast-success {
+  border-color: var(--accent-green);
+  color: var(--accent-green);
+}
+
+.control-bar-toast.toast-error {
+  border-color: var(--accent-red);
+  color: var(--accent-red);
+}
+
+.control-bar-toast.toast-info {
+  border-color: var(--accent-blue);
+  color: var(--accent-blue);
+}
+
 /* Action Button Labels (hidden by default) */
 .action-label {
   display: none;
@@ -3087,6 +3180,13 @@ body {
   min-width: 42px;
   height: 36px;
   padding: 4px 6px;
+}
+
+.show-labels .control-bar-actions .action-btn.voice-btn {
+  min-width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  padding: 4px;
 }
 
 .show-labels .action-label {
@@ -3613,4 +3713,26 @@ body {
 
 .glass-container.flash-full {
   animation: screenshotFlashFull 0.5s ease-out;
+}
+
+/* ============================================================================
+   ANIMATION PAUSING - Visibility & Accessibility
+   ============================================================================ */
+
+/* Pause all infinite animations when the document is hidden */
+body.animations-paused *,
+body.animations-paused *::before,
+body.animations-paused *::after {
+    animation-play-state: paused !important;
+}
+
+/* Accessibility: respect user's motion preferences */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
 }

@@ -20,6 +20,7 @@
     /* The entire panel is draggable by default */
     .control-bar-panel {
       -webkit-app-region: drag;
+      position: relative;
       display: flex;
       align-items: center;
       height: 100%;
@@ -41,8 +42,55 @@
     .control-bar-panel .dev-mode-pill,
     .control-bar-panel .theme-toggle,
     .control-bar-panel .transparency-slider,
-    .control-bar-panel .provider-select {
+    .control-bar-panel .provider-select,
+    .control-bar-panel .collapse-toggle {
       -webkit-app-region: no-drag;
+    }
+
+    /* Collapse/Expand Chevron */
+    .collapse-toggle {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 16px;
+      height: 28px;
+      border: none;
+      background: transparent;
+      color: var(--text-tertiary);
+      cursor: pointer;
+      padding: 0;
+      border-radius: 4px;
+      transition: color 0.2s, background 0.2s, transform 0.2s;
+      flex-shrink: 0;
+    }
+
+    .collapse-toggle:hover {
+      color: var(--text-secondary);
+      background: var(--bg-tertiary);
+    }
+
+    .collapse-toggle svg {
+      transition: transform 0.25s ease;
+    }
+
+    /* Rotate chevron when collapsed (points right = "expand") */
+    .control-bar-panel.collapsed .collapse-toggle svg {
+      transform: rotate(180deg);
+    }
+
+    /* Collapsed state: hide non-essential sections */
+    .control-bar-panel.collapsed .control-bar-status,
+    .control-bar-panel.collapsed .control-bar-divider,
+    .control-bar-panel.collapsed .control-bar-settings,
+    .control-bar-panel.collapsed .collapsible-action,
+    .control-bar-panel.collapsed .labels-btn,
+    .control-bar-panel.collapsed .close-btn {
+      display: none !important;
+    }
+
+    /* Panel shrinks to content width when collapsed */
+    .control-bar-panel.collapsed {
+      width: max-content;
     }
   </style>
 </head>
@@ -54,6 +102,13 @@
         <path d="M11 18c0 1.1-.9 2-2 2s-2-.9-2-2 .9-2 2-2 2 .9 2 2zm-2-8c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0-6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm6 4c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/>
       </svg>
     </div>
+
+    <!-- Collapse/Expand Chevron -->
+    <button id="collapse-toggle" class="collapse-toggle" title="Collapse panel (show essentials only)">
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/>
+      </svg>
+    </button>
 
     <!-- Status Section -->
     <div class="control-bar-status">
@@ -109,7 +164,7 @@
         <span class="action-label">SS</span>
       </button>
 
-      <button id="region-btn" class="action-btn region-btn" title="Select Capture Region (Ctrl+Alt+Shift+R)" data-label="Region">
+      <button id="region-btn" class="action-btn region-btn collapsible-action" title="Select Capture Region (Ctrl+Alt+Shift+R)" data-label="Region">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
           <path d="M17 15h2V7c0-1.1-.9-2-2-2H9v2h8v8zM7 17V1H5v4H1v2h4v10c0 1.1.9 2 2 2h10v4h2v-4h4v-2H7z"/>
         </svg>
@@ -123,42 +178,42 @@
         <span class="action-label">AI</span>
       </button>
 
-      <button id="suggest-btn" class="action-btn suggest-btn" title="What should I say?" data-label="Suggest">
+      <button id="suggest-btn" class="action-btn suggest-btn collapsible-action" title="What should I say?" data-label="Suggest">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
           <path d="M9 21c0 .55.45 1 1 1h4c.55 0 1-.45 1-1v-1H9v1zm3-19C8.14 2 5 5.14 5 9c0 2.38 1.19 4.47 3 5.74V17c0 .55.45 1 1 1h6c.55 0 1-.45 1-1v-2.26c1.81-1.27 3-3.36 3-5.74 0-3.86-3.14-7-7-7zm2.85 11.1l-.85.6V16h-4v-2.3l-.85-.6A4.997 4.997 0 017 9c0-2.76 2.24-5 5-5s5 2.24 5 5c0 1.63-.8 3.16-2.15 4.1z"/>
         </svg>
         <span class="action-label">Suggest</span>
       </button>
 
-      <button id="notes-btn" class="action-btn notes-btn" title="Generate Meeting Notes" data-label="Notes">
+      <button id="notes-btn" class="action-btn notes-btn collapsible-action" title="Generate Meeting Notes" data-label="Notes">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
           <path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/>
         </svg>
         <span class="action-label">Notes</span>
       </button>
 
-      <button id="insights-btn" class="action-btn insights-btn" title="Get Insights" data-label="Insights">
+      <button id="insights-btn" class="action-btn insights-btn collapsible-action" title="Get Insights" data-label="Insights">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
           <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z"/>
         </svg>
         <span class="action-label">Insights</span>
       </button>
 
-      <button id="clear-btn" class="action-btn clear-btn" title="Clear" data-label="Clear">
+      <button id="clear-btn" class="action-btn clear-btn collapsible-action" title="Clear" data-label="Clear">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
           <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>
         </svg>
         <span class="action-label">Clear</span>
       </button>
 
-      <button id="hide-btn" class="action-btn hide-btn" title="Emergency Hide (Ctrl+Alt+Shift+X)" data-label="Hide">
+      <button id="hide-btn" class="action-btn hide-btn collapsible-action" title="Emergency Hide (Ctrl+Alt+Shift+X)" data-label="Hide">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
           <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/>
         </svg>
         <span class="action-label">Hide</span>
       </button>
 
-      <button id="settings-btn" class="action-btn settings-btn" title="Settings" data-label="Settings">
+      <button id="settings-btn" class="action-btn settings-btn collapsible-action" title="Settings" data-label="Settings">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
           <path d="M19.14 12.94c.04-.31.06-.63.06-.94 0-.31-.02-.63-.06-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/>
         </svg>
@@ -179,6 +234,9 @@
         <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
       </svg>
     </button>
+
+    <!-- Toast Notification -->
+    <div id="control-bar-toast" class="control-bar-toast"></div>
   </div>
 
   <script src="control-bar-renderer.js"></script>

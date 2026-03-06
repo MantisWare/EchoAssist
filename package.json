@@ -85,6 +85,15 @@
       "icon": "assets/chrome.png"
     }
   },
+  "packageManager": "pnpm@10.29.3",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "electron",
+      "esbuild",
+      "extract-file-icon",
+      "node-window-manager"
+    ]
+  },
   "author": "Waldo Marais (MantisWare)",
   "license": "MIT"
 }

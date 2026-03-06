@@ -111,7 +111,7 @@ This file tracks all planned features and development phases for EchoAssist.
 
 ## Phase 6: UI/UX Overhaul - Modular Panel System
 
-**Status:** In Progress (Two-Window Architecture Implemented)  
+**Status:** Complete  
 **Goal:** Transform EchoAssist from a monolithic window into a modular, multi-panel system with improved usability and a cleaner interface.
 
 ### Key Changes
@@ -179,8 +179,8 @@ Features:
 - [x] Implement drag-to-reposition functionality for control bar (`-webkit-app-region: drag`)
 - [x] Add grip/handle icon for intuitive dragging
 - [x] Store and restore panel position across sessions (via `settings-store.js` panelState)
-- [ ] Add snap-to-edge behavior (optional magnetism)
-- [ ] Support keyboard shortcut to toggle control bar visibility
+- [x] Add snap-to-edge behavior (optional magnetism)
+- [x] Support keyboard shortcut to toggle control bar visibility (`Ctrl+Alt+Shift+B`)
 - [x] Add close button [×] to exit the entire application
 - [x] Style close button with red hover state for visibility
 
@@ -220,28 +220,40 @@ Features:
 
 #### 6.5 Auto-Scroll Behavior
 - [x] Implement smart auto-scroll (scroll to bottom on new content)
-- [ ] Pause auto-scroll when user manually scrolls up
-- [ ] Resume auto-scroll when user scrolls to bottom
+- [x] Pause auto-scroll when user manually scrolls up
+- [x] Resume auto-scroll when user scrolls to bottom
 - [x] Add visual indicator showing auto-scroll state
-- [ ] Smooth scroll animation for new content
+- [x] Smooth scroll animation for new content
 
 #### 6.6 Panel State Management
 - [x] Save/restore control bar position (via `settings-store.js` panelState)
 - [x] Save/restore transcript window size and position (via `settings-store.js` panelState)
 - [x] Save/restore labels ON/OFF preference
-- [ ] Save/restore summary panel collapsed state
-- [ ] Handle multi-monitor scenarios
+- [x] Save/restore summary panel collapsed state (migrated from localStorage to `settings-store.js` panelState)
+- [x] Handle multi-monitor scenarios (validate saved positions against connected displays)
+
+#### 6.8 Collapsible Control Bar
+- [x] Add chevron toggle button next to drag handle
+- [x] Collapse hides non-essential sections (status, settings, dividers, secondary actions)
+- [x] Collapsed mode retains only Mic, Screenshot, and Ask AI buttons
+- [x] Chevron rotates to indicate collapse/expand direction
+- [x] Window resizes dynamically via IPC (`resize-control-bar`)
+- [x] Collapsed state persists across sessions (`controlBarCollapsed` in UI settings)
 
 #### 6.7 Visual Polish
 - [x] Consistent glass-morphism styling across both panels
 - [x] Smooth animations for panel transitions
 - [x] Hover states for all interactive elements
-- [ ] Focus indicators for keyboard navigation
+- [x] Focus indicators for keyboard navigation (`:focus-visible` on all interactive elements)
 - [x] Dark/light theme support for new components
 
 > **Auto-updated by Cursor:** Core implementation completed on 2026-02-07. Implemented floating control bar, chrome-less window, icon labels system, auto-scroll indicator, close button, and status toast. Some advanced features (position persistence, snap-to-edge, keyboard shortcuts for panel toggle) remain as follow-up items.
 >
 > **Auto-updated by Cursor:** Two-window architecture implemented on 2026-02-07. Split monolithic window into separate control bar BrowserWindow (`control-bar.html`, `control-bar-renderer.js`) and transcript window. Removed `titleBarStyle: 'hidden'` to fix macOS traffic lights. Added `sendToAllWindows()` IPC routing. Panel position persistence via `settings-store.js`. Native context menu for region selection. Both windows are fully frameless, independently draggable, and stealth-compatible.
+>
+> **Auto-updated by Cursor:** Phase 6 completed on 2026-02-18. Implemented all remaining items: control bar toggle shortcut (`Ctrl+Alt+Shift+B`), summary panel collapsed state persistence via settings-store, smart auto-scroll (pause on manual scroll up, resume at bottom), smooth scroll animation, `:focus-visible` keyboard navigation indicators, snap-to-edge magnetism for control bar, and multi-monitor position validation on restore.
+>
+> **Auto-updated by Cursor:** Added collapsible control bar on 2026-02-18. Chevron toggle next to drag handle collapses the bar to essentials only (Mic, Screenshot, AI). Window resizes via IPC. State persists in UI settings.
 
 ### Technical Details
 
@@ -300,6 +312,8 @@ Features:
 - [x] Runtime provider switching via dropdown
 - [x] Provider-optimized prompts
 - [x] INSTANT voice transcription with Vosk
+- [x] Vosk prewarm loads model on launch without activating recording UI
+- [x] Recording only starts on explicit user Mic button click
 - [x] Screenshot analysis with vision AI
 - [x] "What should I say?" suggestions
 - [x] Meeting notes generation
@@ -312,4 +326,6 @@ Features:
 
 ---
 
-*Last updated: 2026-02-08*
+> **Auto-updated by Cursor:** Fixed Vosk auto-recording on 2026-02-18. Added `userActivatedRecording` gate in main.js so prewarm only sends `vosk-prewarm-status` (model readiness) without triggering recording UI. `vosk-status`, `vosk-partial`, and `vosk-final` events are now only forwarded to renderers after the user explicitly clicks the Mic button.
+
+*Last updated: 2026-02-18*

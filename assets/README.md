@@ -61,7 +61,7 @@ Before building, verify:
 
 After adding icons, test the build:
 ```bash
-npm run build
+pnpm build
 ```
 
 If successful, you should see:

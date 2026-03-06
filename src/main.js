@@ -2,6 +2,7 @@ const { app, BrowserWindow, globalShortcut, ipcMain, screen, Menu } = require('e
 const { spawn } = require('child_process');
 
 const fs = require('fs');
+const fsPromises = fs.promises;
 const os = require('os');
 const path = require('path');
 const screenshot = require('screenshot-desktop');
@@ -20,6 +21,36 @@ function isDevelopment() {
 // Helper function to get the correct path based on environment
 function getAppPath() {
   return isDevelopment() ? __dirname : path.join(process.resourcesPath, 'app.asar');
+}
+
+/**
+ * Validate that a window position is visible on at least one connected display.
+ * Returns the original bounds if valid, or repositioned bounds on the primary display.
+ */
+function validateWindowBounds(x, y, width, height) {
+  const displays = screen.getAllDisplays();
+  const MIN_VISIBLE = 50; // At least 50px must be visible on a display
+
+  const isOnScreen = displays.some(display => {
+    const wa = display.workArea;
+    const overlapX = Math.max(0, Math.min(x + width, wa.x + wa.width) - Math.max(x, wa.x));
+    const overlapY = Math.max(0, Math.min(y + height, wa.y + wa.height) - Math.max(y, wa.y));
+    return overlapX >= MIN_VISIBLE && overlapY >= MIN_VISIBLE;
+  });
+
+  if (isOnScreen) {
+    return { x, y, width, height };
+  }
+
+  const primary = screen.getPrimaryDisplay().workArea;
+  const clampedWidth = Math.min(width, primary.width);
+  const clampedHeight = Math.min(height, primary.height);
+  return {
+    x: primary.x + Math.floor((primary.width - clampedWidth) / 2),
+    y: primary.y + Math.floor((primary.height - clampedHeight) / 2),
+    width: clampedWidth,
+    height: clampedHeight
+  };
 }
 
 // Load .env for migration purposes (legacy support)
@@ -68,6 +99,11 @@ let isVoskRunning = false;
 let isVoskPrewarmed = false;
 let voskPrewarmStatus = 'idle'; // 'idle', 'loading', 'ready', 'error'
 let voskStdoutBuffer = ''; // Buffer for incomplete JSON lines from stdout
+let userActivatedRecording = false; // Only true when user explicitly clicks Mic
+let activeTranscriptions = new Set(); // Track one-off transcription child processes
+
+// IPC input validation helpers (defense-in-depth, complements preload validation)
+const VALID_PROVIDERS = new Set(['gemini', 'openai', 'anthropic', 'openrouter']);
 
 /**
  * Process buffered stdout data from the Vosk Python process.
@@ -165,10 +201,16 @@ function createStealthWindow() {
   const savedTranscript = savedPanelState.transcript ?? {};
 
   // Short and wide window dimensions (resizable), use saved if available
-  const windowWidth = savedTranscript.width ?? 900;
-  const windowHeight = savedTranscript.height ?? 400;
-  const x = savedTranscript.x ?? Math.floor((width - windowWidth) / 2);
-  const y = savedTranscript.y ?? 100; // Lower default to leave room for control bar above
+  const rawWidth = savedTranscript.width ?? 900;
+  const rawHeight = savedTranscript.height ?? 400;
+  const rawX = savedTranscript.x ?? Math.floor((width - rawWidth) / 2);
+  const rawY = savedTranscript.y ?? 100;
+
+  const validated = validateWindowBounds(rawX, rawY, rawWidth, rawHeight);
+  const windowWidth = validated.width;
+  const windowHeight = validated.height;
+  const x = validated.x;
+  const y = validated.y;
 
   console.log(`Window position: ${x}, ${y}, size: ${windowWidth}x${windowHeight}`);
 
@@ -396,16 +438,18 @@ function createControlBarWindow() {
   // Load saved panel state, fall back to position above transcript window
   const savedState = settingsStore.getPanelState();
   const windowBounds = mainWindow.getBounds();
-  const controlBarWidth = savedState.controlBar?.width ?? windowBounds.width;
+  const rawCBWidth = savedState.controlBar?.width ?? windowBounds.width;
   const controlBarHeight = 56;
-  const controlBarX = savedState.controlBar?.x ?? windowBounds.x;
-  const controlBarY = savedState.controlBar?.y ?? Math.max(0, windowBounds.y - controlBarHeight - 8);
+  const rawCBX = savedState.controlBar?.x ?? windowBounds.x;
+  const rawCBY = savedState.controlBar?.y ?? Math.max(0, windowBounds.y - controlBarHeight - 8);
+
+  const validatedCB = validateWindowBounds(rawCBX, rawCBY, rawCBWidth, controlBarHeight);
 
   controlBarWindow = new BrowserWindow({
-    width: controlBarWidth,
+    width: validatedCB.width,
     height: controlBarHeight,
-    x: controlBarX,
-    y: controlBarY,
+    x: validatedCB.x,
+    y: validatedCB.y,
     frame: false,
     transparent: true,
     alwaysOnTop: true,
@@ -452,14 +496,60 @@ function createControlBarWindow() {
     console.log('[Phase 6] Control bar window shown');
   });
 
-  // Save position when the control bar is moved
+  // Snap-to-edge behavior and position persistence
+  const SNAP_THRESHOLD = 20;
+
   controlBarWindow.on('moved', () => {
-    if (controlBarWindow && !controlBarWindow.isDestroyed()) {
-      const bounds = controlBarWindow.getBounds();
-      settingsStore.setPanelState({
-        controlBar: { x: bounds.x, y: bounds.y, width: bounds.width }
-      });
+    if (!controlBarWindow || controlBarWindow.isDestroyed()) return;
+
+    const bounds = controlBarWindow.getBounds();
+    const display = screen.getDisplayNearestPoint({ x: bounds.x, y: bounds.y });
+    const workArea = display.workArea;
+
+    let snappedX = bounds.x;
+    let snappedY = bounds.y;
+    let docked = 'floating';
+
+    const distLeft = Math.abs(bounds.x - workArea.x);
+    const distRight = Math.abs((bounds.x + bounds.width) - (workArea.x + workArea.width));
+    const distTop = Math.abs(bounds.y - workArea.y);
+    const distBottom = Math.abs((bounds.y + bounds.height) - (workArea.y + workArea.height));
+    const centerX = workArea.x + Math.floor((workArea.width - bounds.width) / 2);
+    const distCenterX = Math.abs(bounds.x - centerX);
+
+    if (distLeft <= SNAP_THRESHOLD) {
+      snappedX = workArea.x;
+    } else if (distRight <= SNAP_THRESHOLD) {
+      snappedX = workArea.x + workArea.width - bounds.width;
+    } else if (distCenterX <= SNAP_THRESHOLD) {
+      snappedX = centerX;
     }
+
+    if (distTop <= SNAP_THRESHOLD) {
+      snappedY = workArea.y;
+    } else if (distBottom <= SNAP_THRESHOLD) {
+      snappedY = workArea.y + workArea.height - bounds.height;
+    }
+
+    const snappedLeft = snappedX === workArea.x;
+    const snappedRight = snappedX === workArea.x + workArea.width - bounds.width;
+    const snappedTop = snappedY === workArea.y;
+    const snappedBottom = snappedY === workArea.y + workArea.height - bounds.height;
+
+    if (snappedTop && snappedLeft) docked = 'top-left';
+    else if (snappedTop && snappedRight) docked = 'top-right';
+    else if (snappedBottom && snappedLeft) docked = 'bottom-left';
+    else if (snappedBottom && snappedRight) docked = 'bottom-right';
+    else if (snappedTop) docked = 'top-center';
+    else if (snappedBottom) docked = 'bottom-center';
+
+    if (snappedX !== bounds.x || snappedY !== bounds.y) {
+      controlBarWindow.setPosition(snappedX, snappedY);
+    }
+
+    settingsStore.setPanelState({
+      controlBar: { x: snappedX, y: snappedY, width: bounds.width, docked }
+    });
   });
 
   controlBarWindow.on('closed', () => {
@@ -564,6 +654,13 @@ function registerStealthShortcuts() {
   globalShortcut.register('CommandOrControl+Alt+Shift+Down', () => {
     moveToPosition('bottom');
   });
+
+  // Phase 6: Toggle control bar visibility
+  globalShortcut.register('CommandOrControl+Alt+Shift+B', () => {
+    if (controlBarWindow && !controlBarWindow.isDestroyed()) {
+      controlBarWindow.isVisible() ? controlBarWindow.hide() : controlBarWindow.show();
+    }
+  });
 }
 
 let isVisible = true;
@@ -574,6 +671,8 @@ function toggleStealthMode() {
     clearTimeout(autoHideTimer);
     autoHideTimer = null;
   }
+
+  if (!mainWindow || mainWindow.isDestroyed()) return;
 
   if (isVisible) {
     mainWindow.setOpacity(0.6);
@@ -592,8 +691,12 @@ function emergencyHide() {
     autoHideTimer = null;
   }
 
+  userActivatedRecording = false;
+
   // Phase 6: Hide both windows
-  mainWindow.setOpacity(0.01);
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.setOpacity(0.01);
+  }
   if (controlBarWindow && !controlBarWindow.isDestroyed()) {
     controlBarWindow.setOpacity(0.01);
   }
@@ -612,6 +715,7 @@ function emergencyHide() {
 }
 
 function moveToPosition(position) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
   const windowBounds = mainWindow.getBounds();
   
@@ -701,8 +805,11 @@ function destroyRegionOverlay() {
 
 async function takeStealthScreenshot() {
   try {
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      throw new Error('Main window not available');
+    }
     console.log('Taking stealth screenshot...');
-    
+
     // Save current opacity to restore later
     const currentOpacity = mainWindow.getOpacity();
     const controlBarOpacity = controlBarWindow && !controlBarWindow.isDestroyed()
@@ -795,7 +902,7 @@ async function takeStealthScreenshot() {
 
     if (captureMode === 'region') {
       const scaleFactor = currentDisplay.scaleFactor ?? 1;
-      regionService.cropScreenshot(screenshotPath, captureConfig.region, scaleFactor);
+      await regionService.cropScreenshot(screenshotPath, captureConfig.region, scaleFactor);
       console.log(`Screenshot cropped to region: ${captureConfig.region.width}x${captureConfig.region.height}`);
     } else if (captureMode === 'window') {
       const windowBoundsLive = regionService.resolveWindowBounds(captureConfig);
@@ -819,7 +926,7 @@ async function takeStealthScreenshot() {
             width: clampedBounds.width,
             height: clampedBounds.height
           };
-          regionService.cropScreenshot(screenshotPath, relBounds, scaleFactor);
+          await regionService.cropScreenshot(screenshotPath, relBounds, scaleFactor);
           console.log(`Screenshot cropped to window: ${captureConfig.window.title}`);
         }
       } else {
@@ -838,7 +945,9 @@ async function takeStealthScreenshot() {
     }
     
     // Restore the original opacity on both windows
-    mainWindow.setOpacity(currentOpacity);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.setOpacity(currentOpacity);
+    }
     if (controlBarWindow && !controlBarWindow.isDestroyed()) {
       controlBarWindow.setOpacity(controlBarOpacity);
     }
@@ -907,7 +1016,7 @@ async function analyzeForMeetingWithContext(context = '') {
           throw new Error(`Screenshot file not found: ${screenshotPath}`);
         }
         
-        const imageData = fs.readFileSync(screenshotPath);
+        const imageData = await fsPromises.readFile(screenshotPath);
         console.log(`Image data size: ${imageData.length} bytes`);
         
         return {
@@ -1072,6 +1181,9 @@ ipcMain.handle('analyze-stealth', async () => {
 });
 
 ipcMain.handle('analyze-stealth-with-context', async (event, context) => {
+  if (!context || typeof context !== 'string') {
+    return { success: false, error: 'Context must be a non-empty string' };
+  }
   console.log('IPC: analyze-stealth-with-context called with context length:', context.length);
   return await analyzeForMeetingWithContext(context);
 });
@@ -1282,6 +1394,24 @@ ipcMain.handle('get-window-opacity', () => {
   return { success: false, error: 'Window not available' };
 });
 
+ipcMain.handle('resize-control-bar', (event, width) => {
+  if (controlBarWindow === null || controlBarWindow.isDestroyed()) {
+    return { success: false, error: 'Control bar not available' };
+  }
+  const clampedWidth = Math.max(120, Math.round(width));
+  const bounds = controlBarWindow.getBounds();
+  controlBarWindow.setBounds({
+    x: bounds.x,
+    y: bounds.y,
+    width: clampedWidth,
+    height: bounds.height
+  }, false);
+  settingsStore.setPanelState({
+    controlBar: { x: bounds.x, y: bounds.y, width: clampedWidth }
+  });
+  return { success: true, width: clampedWidth };
+});
+
 // ============================================================================
 // IPC HANDLERS - Window Lock (Move/Resize Toggle)
 // ============================================================================
@@ -1380,6 +1510,12 @@ ipcMain.handle('get-api-key-status', () => {
 });
 
 ipcMain.handle('set-api-key', async (event, { provider, apiKey }) => {
+  if (!provider || !VALID_PROVIDERS.has(provider)) {
+    return { success: false, error: `Invalid provider: ${provider}` };
+  }
+  if (typeof apiKey !== 'string') {
+    return { success: false, error: 'API key must be a string' };
+  }
   console.log('IPC: set-api-key called for:', provider);
   try {
     settingsStore.setApiKey(provider, apiKey);
@@ -1449,6 +1585,9 @@ ipcMain.handle('get-ai-settings', () => {
 });
 
 ipcMain.handle('set-ai-settings', async (event, settings) => {
+  if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
+    return { success: false, error: 'Settings must be an object' };
+  }
   console.log('IPC: set-ai-settings called with:', settings);
   try {
     settingsStore.setAISettings(settings);
@@ -1542,6 +1681,9 @@ ipcMain.handle('get-ui-settings', () => {
 });
 
 ipcMain.handle('set-ui-settings', async (event, settings) => {
+  if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
+    return { success: false, error: 'Settings must be an object' };
+  }
   console.log('IPC: set-ui-settings called with:', settings);
   try {
     settingsStore.setUISettings(settings);
@@ -1599,6 +1741,9 @@ ipcMain.handle('get-screenshot-settings', () => {
 });
 
 ipcMain.handle('set-screenshot-settings', async (event, settings) => {
+  if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
+    return { success: false, error: 'Settings must be an object' };
+  }
   console.log('IPC: set-screenshot-settings called with:', settings);
   try {
     settingsStore.setScreenshotSettings(settings);
@@ -1793,8 +1938,12 @@ async function prewarmVoskModel() {
               voskPrewarmStatus = 'loading';
             }
             
-            // Forward status to renderer
-            sendToAllWindows('vosk-status', result);
+            // Only forward vosk-status to renderers if user explicitly started recording.
+            // During prewarm, only send the prewarm-status channel so renderers
+            // update the model readiness indicator without activating recording UI.
+            if (userActivatedRecording) {
+              sendToAllWindows('vosk-status', result);
+            }
             sendToAllWindows('vosk-prewarm-status', {
               status: voskPrewarmStatus,
               message: result.message,
@@ -1803,21 +1952,22 @@ async function prewarmVoskModel() {
             break;
             
           case 'partial':
-            // Forward partial result — renderer decides whether to display based on isRecording
-            sendToAllWindows('vosk-partial', { text: result.text });
+            if (userActivatedRecording) {
+              sendToAllWindows('vosk-partial', { text: result.text });
+            }
             break;
             
           case 'final':
-            // Forward final result — renderer decides whether to display based on isRecording
-            console.log('Vosk transcription:', result.text, result.speaker_changed ? '(speaker changed)' : '');
-            sendToAllWindows('vosk-final', { 
-              text: result.text,
-              speaker_changed: result.speaker_changed === true
-            });
-            
-            // Add to AI service history
-            if (aiService && result.text) {
-              aiService.addToHistory('user', result.text);
+            if (userActivatedRecording) {
+              console.log('Vosk transcription:', result.text, result.speaker_changed ? '(speaker changed)' : '');
+              sendToAllWindows('vosk-final', { 
+                text: result.text,
+                speaker_changed: result.speaker_changed === true
+              });
+              
+              if (aiService !== null && aiService !== undefined && result.text) {
+                aiService.addToHistory('user', result.text);
+              }
             }
             break;
             
@@ -1989,115 +2139,138 @@ ipcMain.handle('download-vosk-model', async (event, requestedModelSize = null) =
     // Download using https module
     const https = require('https');
     const file = fs.createWriteStream(zipPath);
-    
+
+    file.on('error', (err) => {
+      console.error('File write error during Vosk download:', err.message);
+      file.destroy();
+      try { if (fs.existsSync(zipPath)) fs.unlinkSync(zipPath); } catch (e) {}
+    });
+
     return new Promise((resolve, reject) => {
-      const request = https.get(modelConfig.url, (response) => {
-        // Handle redirects
-        if (response.statusCode === 301 || response.statusCode === 302) {
-          https.get(response.headers.location, handleResponse);
-          return;
-        }
-        
-        handleResponse(response);
-        
-        function handleResponse(res) {
-          const totalSize = parseInt(res.headers['content-length'], 10) || modelConfig.size;
-          let downloadedSize = 0;
-          
-          res.on('data', (chunk) => {
-            downloadedSize += chunk.length;
-            file.write(chunk);
-            
-            voskDownloadProgress = Math.round((downloadedSize / totalSize) * 100);
-            
-            // Send progress every 2%
-            if (voskDownloadProgress % 2 === 0) {
-              sendToAllWindows('vosk-download-progress', {
-                status: 'downloading',
-                progress: voskDownloadProgress,
-                message: `Downloading ${modelSize}: ${voskDownloadProgress}% (${Math.round(downloadedSize / 1024 / 1024)}MB / ${Math.round(totalSize / 1024 / 1024)}MB)`,
-                modelSize
-              });
+      let redirectCount = 0;
+      const MAX_REDIRECTS = 5;
+
+      function followUrl(url) {
+        const req = https.get(url, (response) => {
+          // Handle redirects with loop protection
+          if ((response.statusCode === 301 || response.statusCode === 302) && response.headers.location) {
+            redirectCount++;
+            if (redirectCount > MAX_REDIRECTS) {
+              file.destroy();
+              try { if (fs.existsSync(zipPath)) fs.unlinkSync(zipPath); } catch (e) {}
+              isDownloadingVoskModel = false;
+              reject({ success: false, error: `Too many redirects (>${MAX_REDIRECTS})` });
+              return;
             }
+            followUrl(response.headers.location);
+            return;
+          }
+          handleResponse(response);
+        });
+
+        req.on('error', (err) => {
+          file.destroy();
+          try { if (fs.existsSync(zipPath)) fs.unlinkSync(zipPath); } catch (e) {}
+          isDownloadingVoskModel = false;
+
+          sendToAllWindows('vosk-download-progress', {
+            status: 'error',
+            progress: 0,
+            message: `Download failed: ${err.message}`,
+            modelSize
           });
-          
-          res.on('end', async () => {
-            file.end();
-            
-            // Extract
+
+          reject({ success: false, error: err.message });
+        });
+      }
+
+      function handleResponse(res) {
+        const totalSize = parseInt(res.headers['content-length'], 10) || modelConfig.size;
+        let downloadedSize = 0;
+
+        res.on('data', (chunk) => {
+          downloadedSize += chunk.length;
+          file.write(chunk);
+
+          voskDownloadProgress = Math.round((downloadedSize / totalSize) * 100);
+
+          // Send progress every 2%
+          if (voskDownloadProgress % 2 === 0) {
             sendToAllWindows('vosk-download-progress', {
-              status: 'extracting',
-              progress: 100,
-              message: `Extracting ${modelSize} model...`,
+              status: 'downloading',
+              progress: voskDownloadProgress,
+              message: `Downloading ${modelSize}: ${voskDownloadProgress}% (${Math.round(downloadedSize / 1024 / 1024)}MB / ${Math.round(totalSize / 1024 / 1024)}MB)`,
               modelSize
             });
-            
-            try {
-              // Use spawn to extract with unzip (cross-platform alternative)
-              const AdmZip = require('adm-zip');
-              const zip = new AdmZip(zipPath);
-              zip.extractAllTo(modelDir, true);
-              
-              // Clean up zip file
-              fs.unlinkSync(zipPath);
-              
-              isDownloadingVoskModel = false;
-              voskDownloadProgress = 100;
-              
-              sendToAllWindows('vosk-download-progress', {
-                status: 'complete',
-                progress: 100,
-                message: `${modelSize.charAt(0).toUpperCase() + modelSize.slice(1)} model installed successfully!`,
-                modelSize
-              });
-              
-              sendToAllWindows('vosk-model-installed', { installed: true, modelSize });
-              
-              resolve({ success: true, message: 'Model installed successfully', modelSize });
-              
-            } catch (extractError) {
-              console.error('Extract error:', extractError);
-              isDownloadingVoskModel = false;
-              
-              sendToAllWindows('vosk-download-progress', {
-                status: 'error',
-                progress: 0,
-                message: `Extract failed: ${extractError.message}`,
-                modelSize
-              });
-              
-              reject({ success: false, error: extractError.message });
-            }
+          }
+        });
+
+        res.on('end', async () => {
+          file.end();
+
+          // Extract
+          sendToAllWindows('vosk-download-progress', {
+            status: 'extracting',
+            progress: 100,
+            message: `Extracting ${modelSize} model...`,
+            modelSize
           });
-          
-          res.on('error', (err) => {
-            file.end();
+
+          try {
+            // Use spawn to extract with unzip (cross-platform alternative)
+            const AdmZip = require('adm-zip');
+            const zip = new AdmZip(zipPath);
+            zip.extractAllTo(modelDir, true);
+
+            // Clean up zip file
+            fs.unlinkSync(zipPath);
+
             isDownloadingVoskModel = false;
-            
+            voskDownloadProgress = 100;
+
+            sendToAllWindows('vosk-download-progress', {
+              status: 'complete',
+              progress: 100,
+              message: `${modelSize.charAt(0).toUpperCase() + modelSize.slice(1)} model installed successfully!`,
+              modelSize
+            });
+
+            sendToAllWindows('vosk-model-installed', { installed: true, modelSize });
+
+            resolve({ success: true, message: 'Model installed successfully', modelSize });
+
+          } catch (extractError) {
+            console.error('Extract error:', extractError);
+            isDownloadingVoskModel = false;
+
             sendToAllWindows('vosk-download-progress', {
               status: 'error',
               progress: 0,
-              message: `Download failed: ${err.message}`,
+              message: `Extract failed: ${extractError.message}`,
               modelSize
             });
-            
-            reject({ success: false, error: err.message });
-          });
-        }
-      });
-      
-      request.on('error', (err) => {
-        isDownloadingVoskModel = false;
-        
-        sendToAllWindows('vosk-download-progress', {
-          status: 'error',
-          progress: 0,
-          message: `Download failed: ${err.message}`,
-          modelSize
+
+            reject({ success: false, error: extractError.message });
+          }
         });
-        
-        reject({ success: false, error: err.message });
-      });
+
+        res.on('error', (err) => {
+          file.end();
+          try { if (fs.existsSync(zipPath)) fs.unlinkSync(zipPath); } catch (e) {}
+          isDownloadingVoskModel = false;
+
+          sendToAllWindows('vosk-download-progress', {
+            status: 'error',
+            progress: 0,
+            message: `Download failed: ${err.message}`,
+            modelSize
+          });
+
+          reject({ success: false, error: err.message });
+        });
+      }
+
+      followUrl(modelConfig.url);
     });
     
   } catch (error) {
@@ -2327,109 +2500,134 @@ ipcMain.handle('download-speaker-model', async () => {
     
     const https = require('https');
     const file = fs.createWriteStream(zipPath);
-    
+
+    file.on('error', (err) => {
+      console.error('File write error during speaker model download:', err.message);
+      file.destroy();
+      try { if (fs.existsSync(zipPath)) fs.unlinkSync(zipPath); } catch (e) {}
+    });
+
     return new Promise((resolve, reject) => {
-      const request = https.get(VOSK_SPEAKER_MODEL.url, (response) => {
-        if (response.statusCode === 301 || response.statusCode === 302) {
-          https.get(response.headers.location, handleResponse);
-          return;
-        }
-        handleResponse(response);
-        
-        function handleResponse(res) {
-          const totalSize = parseInt(res.headers['content-length'], 10) || VOSK_SPEAKER_MODEL.size;
-          let downloadedSize = 0;
-          
-          res.on('data', (chunk) => {
-            downloadedSize += chunk.length;
-            file.write(chunk);
-            
-            const progress = Math.round((downloadedSize / totalSize) * 100);
-            
-            if (progress % 5 === 0) {
-              sendProgress({
-                status: 'downloading',
-                progress,
-                message: `Downloading: ${progress}%`
-              });
+      let redirectCount = 0;
+      const MAX_REDIRECTS = 5;
+
+      function followUrl(url) {
+        const req = https.get(url, (response) => {
+          // Handle redirects with loop protection
+          if ((response.statusCode === 301 || response.statusCode === 302) && response.headers.location) {
+            redirectCount++;
+            if (redirectCount > MAX_REDIRECTS) {
+              file.destroy();
+              try { if (fs.existsSync(zipPath)) fs.unlinkSync(zipPath); } catch (e) {}
+              isDownloadingSpeakerModel = false;
+              reject({ success: false, error: `Too many redirects (>${MAX_REDIRECTS})` });
+              return;
             }
+            followUrl(response.headers.location);
+            return;
+          }
+          handleResponse(response);
+        });
+
+        req.on('error', (err) => {
+          file.destroy();
+          try { if (fs.existsSync(zipPath)) fs.unlinkSync(zipPath); } catch (e) {}
+          isDownloadingSpeakerModel = false;
+
+          sendProgress({
+            status: 'error',
+            progress: 0,
+            message: `Download failed: ${err.message}`
           });
-          
-          res.on('end', async () => {
-            file.end();
-            
+
+          reject({ success: false, error: err.message });
+        });
+      }
+
+      function handleResponse(res) {
+        const totalSize = parseInt(res.headers['content-length'], 10) || VOSK_SPEAKER_MODEL.size;
+        let downloadedSize = 0;
+
+        res.on('data', (chunk) => {
+          downloadedSize += chunk.length;
+          file.write(chunk);
+
+          const progress = Math.round((downloadedSize / totalSize) * 100);
+
+          if (progress % 5 === 0) {
             sendProgress({
-              status: 'extracting',
-              progress: 100,
-              message: 'Extracting...'
+              status: 'downloading',
+              progress,
+              message: `Downloading: ${progress}%`
             });
-            
-            try {
-              const AdmZip = require('adm-zip');
-              const zip = new AdmZip(zipPath);
-              zip.extractAllTo(modelDir, true);
-              
-              fs.unlinkSync(zipPath);
-              
-              isDownloadingSpeakerModel = false;
-              
-              sendProgress({
-                status: 'complete',
-                progress: 100,
-                message: 'Speaker model installed!'
-              });
-              
-              // Notify both windows
-              const installedData = { installed: true };
-              if (mainWindow && !mainWindow.isDestroyed()) {
-                sendToAllWindows('speaker-model-installed', installedData);
-              }
-              if (settingsWindow && !settingsWindow.isDestroyed()) {
-                settingsWindow.webContents.send('speaker-model-installed', installedData);
-              }
-              
-              resolve({ success: true, message: 'Speaker model installed' });
-              
-            } catch (extractError) {
-              console.error('Extract error:', extractError);
-              isDownloadingSpeakerModel = false;
-              
-              sendProgress({
-                status: 'error',
-                progress: 0,
-                message: `Extract failed: ${extractError.message}`
-              });
-              
-              reject({ success: false, error: extractError.message });
-            }
+          }
+        });
+
+        res.on('end', async () => {
+          file.end();
+
+          sendProgress({
+            status: 'extracting',
+            progress: 100,
+            message: 'Extracting...'
           });
-          
-          res.on('error', (err) => {
-            file.end();
+
+          try {
+            const AdmZip = require('adm-zip');
+            const zip = new AdmZip(zipPath);
+            zip.extractAllTo(modelDir, true);
+
+            fs.unlinkSync(zipPath);
+
             isDownloadingSpeakerModel = false;
-            
+
+            sendProgress({
+              status: 'complete',
+              progress: 100,
+              message: 'Speaker model installed!'
+            });
+
+            // Notify both windows
+            const installedData = { installed: true };
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              sendToAllWindows('speaker-model-installed', installedData);
+            }
+            if (settingsWindow && !settingsWindow.isDestroyed()) {
+              settingsWindow.webContents.send('speaker-model-installed', installedData);
+            }
+
+            resolve({ success: true, message: 'Speaker model installed' });
+
+          } catch (extractError) {
+            console.error('Extract error:', extractError);
+            isDownloadingSpeakerModel = false;
+
             sendProgress({
               status: 'error',
               progress: 0,
-              message: `Download failed: ${err.message}`
+              message: `Extract failed: ${extractError.message}`
             });
-            
-            reject({ success: false, error: err.message });
-          });
-        }
-      });
-      
-      request.on('error', (err) => {
-        isDownloadingSpeakerModel = false;
-        
-        sendProgress({
-          status: 'error',
-          progress: 0,
-          message: `Download failed: ${err.message}`
+
+            reject({ success: false, error: extractError.message });
+          }
         });
-        
-        reject({ success: false, error: err.message });
-      });
+
+        res.on('error', (err) => {
+          file.end();
+          try { if (fs.existsSync(zipPath)) fs.unlinkSync(zipPath); } catch (e) {}
+          isDownloadingSpeakerModel = false;
+
+          sendProgress({
+            status: 'error',
+            progress: 0,
+            message: `Download failed: ${err.message}`
+          });
+
+          reject({ success: false, error: err.message });
+        });
+      }
+
+      followUrl(VOSK_SPEAKER_MODEL.url);
     });
     
   } catch (error) {
@@ -2575,6 +2773,8 @@ ipcMain.handle('start-voice-recognition', () => {
     };
   }
 
+  userActivatedRecording = true;
+
   // If Vosk is already prewarmed and running, just signal that recording started
   if (isVoskRunning && isVoskPrewarmed) {
     console.log('Vosk already prewarmed and running - recording started');
@@ -2627,7 +2827,9 @@ ipcMain.handle('start-voice-recognition', () => {
               voskPrewarmStatus = 'ready';
             }
             
-            sendToAllWindows('vosk-status', result);
+            if (userActivatedRecording) {
+              sendToAllWindows('vosk-status', result);
+            }
             sendToAllWindows('vosk-prewarm-status', {
               status: voskPrewarmStatus,
               message: result.message,
@@ -2636,19 +2838,22 @@ ipcMain.handle('start-voice-recognition', () => {
             break;
 
           case 'partial':
-            sendToAllWindows('vosk-partial', { text: result.text });
+            if (userActivatedRecording) {
+              sendToAllWindows('vosk-partial', { text: result.text });
+            }
             break;
 
           case 'final':
-            console.log('Vosk transcription:', result.text, result.speaker_changed ? '(speaker changed)' : '');
-            sendToAllWindows('vosk-final', { 
-              text: result.text,
-              speaker_changed: result.speaker_changed === true
-            });
+            if (userActivatedRecording) {
+              console.log('Vosk transcription:', result.text, result.speaker_changed ? '(speaker changed)' : '');
+              sendToAllWindows('vosk-final', { 
+                text: result.text,
+                speaker_changed: result.speaker_changed === true
+              });
 
-            // Add to AI service history
-            if (aiService && result.text) {
-              aiService.addToHistory('user', result.text);
+              if (aiService !== null && aiService !== undefined && result.text) {
+                aiService.addToHistory('user', result.text);
+              }
             }
             break;
 
@@ -2695,15 +2900,32 @@ ipcMain.handle('start-voice-recognition', () => {
 ipcMain.handle('stop-voice-recognition', () => {
   console.log('IPC: stop-voice-recognition called');
 
+  userActivatedRecording = false;
+
   if (!isVoskRunning || !voskProcess) {
     return { success: true, message: 'Not running' };
   }
 
   try {
+    // Actually kill the Vosk process
+    if (voskProcess && !voskProcess.killed) {
+      voskProcess.kill('SIGTERM');
+    }
+
+    // Reset all Vosk state immediately (the 'close' event handler also
+    // resets these, but we set them here for immediate consistency)
+    isVoskRunning = false;
+    isVoskPrewarmed = false;
+    voskPrewarmStatus = 'idle';
+    voskStdoutBuffer = '';
+    voskProcess = null;
+
     sendToAllWindows('vosk-status', {
       status: 'stopped',
-      message: 'Paused listening'
+      message: 'Voice recognition stopped'
     });
+    sendToAllWindows('vosk-stopped');
+
     return { success: true };
   } catch (error) {
     console.error('Error stopping Vosk:', error.message);
@@ -2716,6 +2938,9 @@ ipcMain.handle('stop-voice-recognition', () => {
 // ============================================================================
 
 ipcMain.handle('transcribe-audio', async (event, base64Audio, mimeType) => {
+  if (!base64Audio || typeof base64Audio !== 'string') {
+    return { success: false, error: 'base64Audio must be a non-empty string' };
+  }
   console.log('IPC: transcribe-audio called, size:', base64Audio.length);
 
   const tmpDir = path.join(app.getPath('temp'), 'echoassist-audio');
@@ -2727,7 +2952,7 @@ ipcMain.handle('transcribe-audio', async (event, base64Audio, mimeType) => {
 
     const audioBuffer = Buffer.from(base64Audio, 'base64');
     const tempAudioPath = path.join(tmpDir, `audio_${Date.now()}.webm`);
-    fs.writeFileSync(tempAudioPath, audioBuffer);
+    await fsPromises.writeFile(tempAudioPath, audioBuffer);
 
     console.log('Saved temp audio:', tempAudioPath, audioBuffer.length, 'bytes');
 
@@ -2738,6 +2963,7 @@ ipcMain.handle('transcribe-audio', async (event, base64Audio, mimeType) => {
       console.log('Running Python script:', pythonScript);
 
       const python = spawn('python', [pythonScript, tempAudioPath]);
+      activeTranscriptions.add(python);
 
       let output = '';
       let errorOutput = '';
@@ -2751,6 +2977,7 @@ ipcMain.handle('transcribe-audio', async (event, base64Audio, mimeType) => {
       });
 
       python.on('close', (code) => {
+        activeTranscriptions.delete(python);
         try {
           fs.unlinkSync(tempAudioPath);
         } catch (e) {
@@ -2785,6 +3012,7 @@ ipcMain.handle('transcribe-audio', async (event, base64Audio, mimeType) => {
       });
 
       python.on('error', (error) => {
+        activeTranscriptions.delete(python);
         console.error('Failed to start Python:', error.message);
 
         try {
@@ -2887,6 +3115,9 @@ ipcMain.handle('get-conversation-insights', async () => {
 });
 
 ipcMain.handle('analyze-with-ai', async (event, prompt, imageData) => {
+  if (!prompt || typeof prompt !== 'string') {
+    return { success: false, error: 'Prompt must be a non-empty string' };
+  }
   console.log('IPC: analyze-with-ai called');
   try {
     if (!aiService) {
@@ -2987,9 +3218,36 @@ app.on('activate', () => {
   }
 });
 
+/**
+ * Kill all active child processes (Vosk + transcription).
+ * Called on app quit to prevent orphaned processes.
+ */
+function killAllChildProcesses() {
+  if (voskProcess && !voskProcess.killed) {
+    console.log('Killing Vosk process on quit...');
+    voskProcess.kill('SIGTERM');
+    voskProcess = null;
+    isVoskRunning = false;
+    isVoskPrewarmed = false;
+    voskPrewarmStatus = 'idle';
+    voskStdoutBuffer = '';
+  }
+
+  if (activeTranscriptions.size > 0) {
+    console.log(`Killing ${activeTranscriptions.size} active transcription process(es)...`);
+    for (const proc of activeTranscriptions) {
+      if (!proc.killed) proc.kill('SIGTERM');
+    }
+    activeTranscriptions.clear();
+  }
+}
+
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
-  
+
+  // Kill all child processes to prevent orphans
+  killAllChildProcesses();
+
   screenshots.forEach(screenshotPath => {
     if (fs.existsSync(screenshotPath)) fs.unlinkSync(screenshotPath);
   });
@@ -3001,6 +3259,10 @@ app.on('web-contents-created', (event, contents) => {
   });
   
   contents.on('will-navigate', (event, navigationUrl) => {
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      event.preventDefault();
+      return;
+    }
     if (navigationUrl !== mainWindow.webContents.getURL()) {
       event.preventDefault();
     }

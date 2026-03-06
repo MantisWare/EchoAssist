@@ -6,7 +6,10 @@
 // ============================================================================
 
 const Store = require('electron-store');
-const { safeStorage } = require('electron');
+const { safeStorage, app } = require('electron');
+const crypto = require('crypto');
+const path = require('path');
+const fs = require('fs');
 
 // Schema for settings validation
 const schema = {
@@ -94,7 +97,8 @@ const schema = {
         properties: {
           x: { type: 'number' },
           y: { type: 'number' },
-          width: { type: 'number' }
+          width: { type: 'number' },
+          docked: { type: 'string', default: 'floating' }
         }
       },
       transcript: {
@@ -106,6 +110,13 @@ const schema = {
           width: { type: 'number' },
           height: { type: 'number' },
           locked: { type: 'boolean', default: false }
+        }
+      },
+      summary: {
+        type: 'object',
+        default: {},
+        properties: {
+          collapsed: { type: 'boolean', default: false }
         }
       }
     }
@@ -169,16 +180,96 @@ const schema = {
   }
 };
 
+/**
+ * Get or generate the encryption key for electron-store.
+ * Priority:
+ *   1. Read existing key from key file, decrypt with safeStorage
+ *   2. Generate a new random key, encrypt with safeStorage, save to file
+ *   3. Fallback: derive from machine-specific info (hostname + username + platform)
+ *
+ * @returns {string} Encryption key for electron-store
+ */
+function getOrCreateEncryptionKey() {
+  const KEY_FILE_NAME = '.echoassist-store-key';
+  const os = require('os');
+
+  // Determine key file path
+  let keyFilePath;
+  try {
+    keyFilePath = path.join(app.getPath('userData'), KEY_FILE_NAME);
+  } catch {
+    keyFilePath = path.join(os.homedir(), KEY_FILE_NAME);
+  }
+
+  // Try to read existing key
+  if (fs.existsSync(keyFilePath)) {
+    try {
+      const stored = fs.readFileSync(keyFilePath, 'utf8').trim();
+
+      if (stored.startsWith('derived:')) {
+        // Machine-derived fallback key (not encrypted)
+        return stored;
+      }
+
+      if (safeStorage.isEncryptionAvailable()) {
+        const buffer = Buffer.from(stored, 'base64');
+        return safeStorage.decryptString(buffer);
+      }
+
+      // safeStorage was available when key was saved, but not now — regenerate
+      console.warn('[SettingsStore] safeStorage unavailable, cannot decrypt stored key. Regenerating.');
+    } catch (err) {
+      console.warn('[SettingsStore] Failed to read encryption key file:', err.message);
+    }
+  }
+
+  // Generate new key
+  if (safeStorage.isEncryptionAvailable()) {
+    const rawKey = crypto.randomBytes(32).toString('hex');
+    try {
+      const encrypted = safeStorage.encryptString(rawKey);
+      fs.writeFileSync(keyFilePath, encrypted.toString('base64'), { mode: 0o600 });
+      console.log('[SettingsStore] Generated and saved new encryption key (safeStorage)');
+      return rawKey;
+    } catch (err) {
+      console.warn('[SettingsStore] Failed to save encryption key:', err.message);
+      return rawKey; // Use in-memory only this session
+    }
+  }
+
+  // Fallback: derive from machine identity
+  console.warn('[SettingsStore] safeStorage unavailable. Deriving encryption key from machine identity.');
+  const machineId = `${os.hostname()}:${os.userInfo().username}:${process.platform}:${os.homedir()}`;
+  const derivedKey = 'derived:' + crypto.createHash('sha256').update(machineId).digest('hex');
+
+  try {
+    fs.writeFileSync(keyFilePath, derivedKey, { mode: 0o600 });
+  } catch (err) {
+    console.warn('[SettingsStore] Failed to save derived key:', err.message);
+  }
+
+  return derivedKey;
+}
+
 class SettingsStore {
   constructor() {
+    let encryptionKey;
+    try {
+      encryptionKey = getOrCreateEncryptionKey();
+    } catch (err) {
+      console.error('[SettingsStore] Failed to get encryption key, using fallback:', err.message);
+      encryptionKey = 'echoassist-fallback-' + require('os').hostname();
+    }
+
     this.store = new Store({
       name: 'echoassist-settings',
       schema,
-      encryptionKey: 'echoassist-2026', // Base encryption for non-sensitive data
+      encryptionKey,
       clearInvalidConfig: true
     });
-    
-    console.log('[SettingsStore] Initialized at:', this.store.path);
+
+    this._encryptionKeySource = safeStorage.isEncryptionAvailable() ? 'safeStorage' : 'derived';
+    console.log(`[SettingsStore] Initialized at: ${this.store.path} (key source: ${this._encryptionKeySource})`);
   }
 
   // ========================================================================
@@ -194,21 +285,33 @@ class SettingsStore {
   }
 
   /**
+   * Get encryption status details for diagnostics/UI display
+   * @returns {{ available: boolean, source: string }}
+   */
+  getEncryptionStatus() {
+    return {
+      available: safeStorage.isEncryptionAvailable(),
+      source: this._encryptionKeySource ?? 'unknown'
+    };
+  }
+
+  /**
    * Encrypt a string using safeStorage
    * @param {string} value - Value to encrypt
    * @returns {string} - Base64 encoded encrypted string
    */
   _encryptValue(value) {
     if (!value) return '';
-    
+
     if (safeStorage.isEncryptionAvailable()) {
       const encrypted = safeStorage.encryptString(value);
       return encrypted.toString('base64');
     }
-    
-    // Fallback: Store as-is (not recommended, but better than failing)
-    console.warn('[SettingsStore] safeStorage not available, storing unencrypted');
-    return Buffer.from(value).toString('base64');
+
+    // Fallback: base64 encode only (NOT encrypted — trivially reversible)
+    // Prefix with 'b64:' so _decryptValue can distinguish from safeStorage data
+    console.warn('[SettingsStore] WARNING: safeStorage not available. API key stored with base64 encoding only (not secure).');
+    return 'b64:' + Buffer.from(value).toString('base64');
   }
 
   /**
@@ -218,15 +321,21 @@ class SettingsStore {
    */
   _decryptValue(encryptedBase64) {
     if (!encryptedBase64) return '';
-    
+
     try {
+      // Check for base64-only fallback prefix
+      if (encryptedBase64.startsWith('b64:')) {
+        console.warn('[SettingsStore] Decrypting base64-only value (not securely encrypted)');
+        return Buffer.from(encryptedBase64.slice(4), 'base64').toString('utf8');
+      }
+
       const buffer = Buffer.from(encryptedBase64, 'base64');
-      
+
       if (safeStorage.isEncryptionAvailable()) {
         return safeStorage.decryptString(buffer);
       }
-      
-      // Fallback: Decode as-is
+
+      // Fallback: Decode as-is (legacy data without prefix)
       return buffer.toString('utf8');
     } catch (error) {
       console.error('[SettingsStore] Decryption error:', error.message);
@@ -490,7 +599,8 @@ class SettingsStore {
   getPanelState() {
     return this.store.get('panelState', {
       controlBar: {},
-      transcript: {}
+      transcript: {},
+      summary: {}
     });
   }
 
@@ -500,13 +610,15 @@ class SettingsStore {
    */
   setPanelState(state) {
     const current = this.getPanelState();
-    // Deep merge for nested panel objects (controlBar, transcript)
     const merged = { ...current };
     if (state.controlBar !== undefined) {
       merged.controlBar = { ...current.controlBar, ...state.controlBar };
     }
     if (state.transcript !== undefined) {
       merged.transcript = { ...current.transcript, ...state.transcript };
+    }
+    if (state.summary !== undefined) {
+      merged.summary = { ...current.summary, ...state.summary };
     }
     this.store.set('panelState', merged);
     console.log('[SettingsStore] Panel state updated');

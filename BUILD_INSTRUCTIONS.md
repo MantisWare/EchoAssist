@@ -4,8 +4,8 @@ This guide will help you build the app as a disguised Chrome executable.
 
 ## Prerequisites
 
-1. **Node.js and npm** installed
-2. **All dependencies** installed (`npm install`)
+1. **Node.js and pnpm** installed
+2. **All dependencies** installed (`pnpm install`)
 3. **Chrome icon files** (see below)
 
 ## Step 1: Get Chrome Icon
@@ -39,7 +39,7 @@ echo-assist/assets/
 
 ### For Windows (Portable EXE):
 ```bash
-npm run build
+pnpm build
 ```
 
 This will create: `dist/GoogleChrome.exe`
@@ -48,7 +48,7 @@ This will create: `dist/GoogleChrome.exe`
 
 **Portable (recommended for stealth):**
 ```bash
-npm run build -- --win portable
+pnpm build --win portable
 ```
 - Creates: `dist/GoogleChrome.exe`
 - No installation required
@@ -57,7 +57,7 @@ npm run build -- --win portable
 
 **NSIS Installer (for permanent installation):**
 ```bash
-npm run build -- --win nsis
+pnpm build --win nsis
 ```
 - Creates: `dist/Google Chrome (2) Setup.exe`
 - Installs to Program Files
@@ -158,11 +158,11 @@ app.setLoginItemSettings({
 ### Icon not showing:
 - Make sure `assets/chrome.ico` exists
 - Icon must be 256x256 or higher
-- Try rebuilding: `npm run build -- --win portable`
+- Try rebuilding: `pnpm build --win portable`
 
 ### Build fails:
-- Run: `npm install electron-builder --save-dev`
-- Clear cache: `npm run build -- --win portable --clean`
+- Run: `pnpm add -D electron-builder`
+- Clear cache: `pnpm build --win portable --clean`
 
 ### .env file missing in build:
 - Check `extraResources` in package.json
@@ -202,7 +202,7 @@ To share the app:
 
 To rebuild after changes:
 ```bash
-npm run build
+pnpm build
 ```
 
 This will overwrite the previous build in `dist/`.
